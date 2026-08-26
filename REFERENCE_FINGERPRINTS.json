@@ -1,0 +1,123 @@
+{
+  "bashrc": {
+    "original_sha256": "984e1d34fb69bd83d43335e62911503461b389f96f86c5c837f7aab57a48417d",
+    "patched_sha256": "eab95c4ef39ba900fdd87684feee916f36e2901d3a7abe3fe65d2cde459e0f88",
+    "size": 5699
+  },
+  "config_partition": {
+    "end_inclusive": "0x7FFFFF",
+    "raw_hash_is_not_invariant": true,
+    "size": 131072,
+    "start": "0x7E0000",
+    "validation": "JFFS2 structure/CRCs, known names, unambiguous serial, serial/UOID prefix"
+  },
+  "format_version": 2,
+  "full_size": 8388608,
+  "invariant_definition": {
+    "excluded_ranges": [
+      {
+        "end_inclusive": "0x46AFFF",
+        "reason": "separately validated stock/patched bashrc SquashFS window",
+        "start": "0x463000"
+      },
+      {
+        "end_inclusive": "0x7D200C",
+        "reason": "unit-specific HWCONFIG check value",
+        "start": "0x7D200B"
+      },
+      {
+        "end_inclusive": "0x7D206E",
+        "reason": "unit-specific 94-byte HWCONFIG UOID",
+        "start": "0x7D2011"
+      }
+    ],
+    "included": "All bytes from 0x000000 through 0x7DFFFF except the ranges listed below"
+  },
+  "invariant_sha256": "7346221d7814c8ef4412ced5f3795891f077f89ba64cf61d087e01fc5344f62f",
+  "reference_images": [
+    {
+      "label": "Discord bricked image",
+      "sha256": "4325aebe84d70dd937de1790aa48f4b36ee2731def0ee5504ed080e4df13e819",
+      "state": "stock system, exhausted config"
+    },
+    {
+      "label": "Discord config-recovery image",
+      "sha256": "a25d83ae5786fbc3306ba6f6403e9f174969e53ea3aeb6355e129463b3a5644a",
+      "state": "stock system, rebuilt config"
+    },
+    {
+      "label": "Second camera original physical dump",
+      "sha256": "ff9c8962abd06a14661db1857f6318b06f6378e93c4d812d96224094063bbcf9",
+      "state": "stock system, exhausted config"
+    },
+    {
+      "label": "Second camera permanent full readback",
+      "sha256": "269f1b3b205e2ac30ada7cb98a7aeb9ada2e76786dc14abe95ea9c56dce73d1f",
+      "state": "audited bashrc patch, rebuilt config"
+    }
+  ],
+  "scope": "Exact CC2 stock-camera firmware family observed in two independent cameras",
+  "segments": {
+    "boot": {
+      "end_exclusive": "0x040000",
+      "sha256": "5602ec961b4410ccceea0d4910e4fa768c6998bd4ba86143ba50855bdd0b7a54",
+      "start": "0x000000"
+    },
+    "hwconfig_after_uoid": {
+      "end_exclusive": "0x7E0000",
+      "sha256": "98d0beba4c7328a7237bc1a18fdd5e3da64c9f009e3b1c253ea39167a6dabd97",
+      "start": "0x7D206F"
+    },
+    "hwconfig_before_identity_check": {
+      "end_exclusive": "0x7D200B",
+      "sha256": "0e1514680c4e25e5c431adae5d4cb98bac14746b6e8fc30eb346ec75249f7cc5",
+      "start": "0x7D0000"
+    },
+    "hwconfig_between_identity_fields": {
+      "end_exclusive": "0x7D2011",
+      "sha256": "3c3351dc1dedcd627419e02de4fc8202e2d507d786c26f142b767fd9859d0cb4",
+      "start": "0x7D200D"
+    },
+    "kernel": {
+      "end_exclusive": "0x190000",
+      "sha256": "0855c3a93f571c3130f1bdd38469e7c806ce713550a3ce536c81167579341545",
+      "start": "0x040000"
+    },
+    "root": {
+      "end_exclusive": "0x2E8000",
+      "sha256": "6049eaacfaba6a2c3db2ed7a5f31cd02df8d793e166249f6a8a2180e89824cba",
+      "start": "0x190000"
+    },
+    "system_after_patch": {
+      "end_exclusive": "0x7D0000",
+      "sha256": "07a3b00fe224a8e121f760753998335e7f6d59f1cfe2dc92087c040083f46b3a",
+      "start": "0x46B000"
+    },
+    "system_before_patch": {
+      "end_exclusive": "0x463000",
+      "sha256": "0e76c9eb0dfb499c7556a6a111608757b6c9e32705c07492f172253255fe8041",
+      "start": "0x2E8000"
+    }
+  },
+  "system_patch_window": {
+    "end_inclusive": "0x46AFFF",
+    "patched_sha256": "36e9b9b29dffcd775b094ff67a121fbb78b1871a7eda059371cbafc562251b2b",
+    "size": 32768,
+    "start": "0x463000",
+    "stock_sha256": "5591f5350feabb73fd29e21ae72ee9c3c9dab0c6bb78e02178267e5cb2ab4780",
+    "generation": "readable bashrc source replacement plus deterministic single-block XZ reconstruction",
+    "fragment": {
+      "absolute_start": "0x463600",
+      "bashrc_fragment_offset": 29000,
+      "dictionary_size": 131072,
+      "stock_decompressed_sha256": "322825a20f30d04d5ad6fc2f677cd8fce2b0c43189d802d1fbb05d2049c07329",
+      "stock_xz_sha256": "4c6d2cf7ce219721a8f027056c207d05fb01e1ae2165bf17e5208f37d690869f",
+      "stock_xz_size": 26268,
+      "patched_decompressed_sha256": "a6a65889a5d79a8b8935cbf1602c1a152a52c2d28f66821f0a5adaac9546c905",
+      "patched_xz_sha256": "ca9162b4b6b7a898901be0503d5c4cb10e94f01c44e79caf4f7c3a5172e768f5",
+      "patched_xz_size": 25564,
+      "uncompressed_size": 100167
+    }
+  },
+  "tool_version": "1.1.0"
+}
