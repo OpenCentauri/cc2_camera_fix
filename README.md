@@ -23,9 +23,11 @@ A missing image does not by itself prove that the camera flash is corrupted. Iso
 
 1. Power the printer off and unplug it from mains power.
 2. Unscrew the stock camera module and unplug its four-wire cable from the printer. Do not work on the connector while the printer is powered.
-3. Power the printer back on with the stock camera disconnected.
-4. Connect a known-working, ordinary USB webcam to the printer's front USB port.
+3. Connect a known-working, ordinary USB webcam to the printer's front USB port while the printer is still off.
+4. Power the printer back on with the stock camera disconnected.
 5. If that webcam produces a feed, the printer mainboard, software, and USB-camera path are working; failure of the stock camera module is then likely. If the replacement webcam also fails, diagnose the printer side before attempting this repair.
+
+Connecting the replacement webcam before boot is the safest way to have it appear as `/dev/video0`, which is the device the CC2 uses. Connecting it later can also work, but unplugging and reconnecting USB cameras repeatedly may assign different `/dev/video*` identifiers.
 
 This is a useful isolation test, not proof of this exact flash failure. The builder provides the final check: it refuses a dump unless its firmware structure and invariant bytes match the supported camera firmware exactly.
 
