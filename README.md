@@ -1,57 +1,49 @@
 # CC2 Camera Recovery Builder
 
-A strict, auditable recovery-image builder for the stock Elegoo Centauri Carbon 2 camera firmware observed in two independently obtained 8 MiB SPI-NOR images with different unit identities.
+This project can recover a stock Elegoo Centauri Carbon 2 camera that no longer boots, and it patches the firmware so the same failure should not recur from normal boot cycles.
 
-The tool validates the dump, recovers and preserves that camera's own `serial.cfg`, rebuilds the exhausted JFFS2 `config` partition, and applies the audited `/home/bashrc.sh` mitigation that stops the five default configuration files from being rewritten on every boot.
+The repair is designed to preserve the identity of **your** camera. It starts from your own flash dump; there is no generic firmware image in this repository and you should not write another camera's dump to your device.
 
-It uses only the Python standard library. It does **not** contain a firmware image or opaque binary patch blob. The system change is generated from a readable shell-source replacement, deterministic XZ construction, and exact input/output hashes.
+## Why the stock camera stops working
 
-## Supported image family
+The stock camera is a small Linux computer, not just an image sensor. Its firmware has a writable 128 KiB JFFS2 `config` partition. During every boot, the vendor startup script unconditionally copies the same five default configuration files into that partition again.
 
-This release intentionally accepts only the exact firmware family already verified in both reference cameras:
+Normally JFFS2 garbage collection would reclaim the obsolete copies. On this firmware and flash layout, erase/garbage collection does not work correctly. The old records accumulate until the partition cannot accept the next boot-time writes. The camera then fails to finish booting and no longer appears as a working USB camera. From the printer, the symptom is simply a missing or permanently dead camera feed.
 
-- 8 MiB `ZB25VQ64` SPI NOR
-- Ingenic T23N
-- Linux `3.10.14__isvp_pike_1.0__`
-- kernel build dated 2025-12-03
-- Jovision `ucamera` v1.1.83
-- partition layout:
+This tool repairs both parts of that problem:
 
-```text
-0x000000–0x03FFFF  boot
-0x040000–0x18FFFF  kernel
-0x190000–0x2E7FFF  root
-0x2E8000–0x7CFFFF  system
-0x7D0000–0x7DFFFF  HWCONFIG
-0x7E0000–0x7FFFFF  config
-```
+- it rebuilds the exhausted `config` partition while preserving the camera's own serial data;
+- it changes the startup script to create each default file only when it is missing, stopping the deterministic write leak.
 
-There is no override or `--force` option for a mismatching firmware build.
+## Check that the camera is actually the problem
 
-## What “100% match apart from unit data” means
+A missing image does not by itself prove that the camera flash is corrupted. Isolate the camera from the printer before buying or connecting a programmer:
 
-A complete raw dump cannot be compared by ignoring only the visible serial string: JFFS2 appends new nodes on each boot, so two otherwise identical cameras naturally have different raw `config` histories. The HWCONFIG partition also contains a per-unit UOID and an associated two-byte value.
+1. Power the printer off and unplug it from mains power.
+2. Unscrew the stock camera module and unplug its four-wire cable from the printer. Do not work on the connector while the printer is powered.
+3. Reassemble or secure everything sufficiently that no loose conductor can short, then power the printer back on without the stock camera connected.
+4. Connect a known-working, ordinary USB webcam to the printer's front USB port.
+5. If that webcam produces a feed, the printer mainboard, software, and USB-camera path are working; failure of the stock camera module is then likely. If the replacement webcam also fails, diagnose the printer side before attempting this repair.
 
-The validator therefore performs the strongest safe equivalent:
+This is a useful isolation test, not proof of this exact flash failure. The builder provides the final check: it refuses a dump unless its firmware structure and invariant bytes match the supported camera firmware exactly.
 
-1. Every firmware byte that should be invariant must match the two independently obtained references exactly.
-2. The 32 KiB SquashFS window containing `bashrc.sh` must equal either the exact stock hash or the exact audited patched hash.
-3. Only these unit-specific/mutable fields are excluded from the invariant hash:
+## What this repair requires
 
-```text
-0x7D200B–0x7D200C  two-byte HWCONFIG unit check value
-0x7D2011–0x7D206E  94-byte HWCONFIG UOID
-0x7E0000–0x7FFFFF  writable JFFS2 config log
-```
+This is a hardware recovery. You must read and rewrite the camera's eight-pin SPI flash memory with an external programmer.
 
-4. The excluded fields are not ignored blindly:
-   - the UOID must have the expected 94-byte structure;
-   - `config` must contain CRC-valid JFFS2 nodes;
-   - only the six known filenames are accepted;
-   - exactly one unambiguous `serial.cfg` value must be recoverable;
-   - the serial and UOID must share the expected 12-byte unit prefix.
+The recommended beginner setup is:
 
-No other differences are accepted. See `REFERENCE_FINGERPRINTS.json`.
+- a CH341A/CH341B USB programmer that has been verified for 3.3 V operation;
+- an SOIC-8 test clip and cable, allowing the chip to be accessed on the camera board;
+- a multimeter;
+- NeoProgrammer on a Windows computer;
+- Python 3.10 or later for validating the dump and building the repaired image.
+
+A CH341 programmer is inexpensive and worked in-circuit on the tested camera: the flash did not need to be unsoldered. A Bus Pirate is still documented as an alternative, but in-circuit access may fail because other components on the board load or interfere with the SPI bus; on the tested setup it worked only after the flash was unsoldered.
+
+> **Quick voltage safety check:** with the camera disconnected and the programmer powered from USB, measure CH341A pin 28 (`VCC`) relative to ground. It should be approximately **3.3 V**; if it is near 5 V, stop and do not connect the camera. Pin 28 is opposite pin 1 across the notched end of the 28-pin package—confirm the pinout before probing.
+>
+> This is a useful screening check, not complete certification. Some older CH341A board revisions need a soldered modification or external 3.3 V level shifting, while safe revisions exist and newer stock is often already corrected. Labels and purchase date are not proof: research your exact board and, if uncertain, also measure flash `VCC` and the SPI logic levels. See the [CH341 datasheet](https://www.wch-ic.com/downloads/CH341DS1_PDF.html) and the [older black-board voltage issue](https://wej.k.vu/electronics/ch341a-mini-programmer-fix/) for background.
 
 ## What the builder changes
 
@@ -91,14 +83,11 @@ The builder extracts the camera's own CRC-valid `serial.cfg` and creates a minim
 
 The five standard UVC/config files are intentionally omitted. The patched startup script creates each missing default once on the first successful boot.
 
-## Requirements
-
-- Python 3.10 or later
-- one full 8 MiB flash dump
-- preferably three independently read dumps with identical SHA-256 hashes
-- either `flashrom` with a suitable SPI programmer, or NeoProgrammer with a voltage-verified CH341A/CH341B, for the eventual write
-
 ## Usage
+
+Download `cc2_sig_tool.py` from this repository and place it in a working directory. You need Python 3.10 or later and a full 8 MiB dump from your camera. Do not continue to a write until you have three independently read dumps with identical SHA-256 hashes.
+
+The examples below use the Windows Python launcher because NeoProgrammer is a Windows application. On Linux or macOS, replace `py` with `python3`.
 
 Run the internal self-test. Supplying a supported ROM also exercises the complete readable SquashFS patch path:
 
@@ -161,18 +150,14 @@ This option is accepted only when the partition already equals the exact canonic
 
 ## Programmer instructions
 
-### Option A: flashrom with Bus Pirate
-
-Use the command generated in `FLASHING.txt`. It writes only the regions reported as changed and deliberately does not enable programmer-supplied target power. Verify the exact chip voltage, pinout, and programmer wiring independently before connecting it.
-
-### Option B: NeoProgrammer with CH341A/CH341B
+### Recommended: NeoProgrammer with CH341A/CH341B
 
 NeoProgrammer does not use `cc2-camera-layout.txt`. This workflow erases, writes, and verifies the **complete 8 MiB** `cc2-camera-recovery.bin`, including the unit-specific data copied from the validated input dump.
 
 #### Electrical checks
 
 1. Read the complete part marking on the camera's SPI flash. The verified firmware family uses a 64 Mbit/8 MiB `ZB25VQ64`-family 3 V SPI NOR, but the exact chip and voltage on the board in front of you take precedence. The manufacturer describes `ZB25VQ64` as a 3 V device; do not infer voltage from programmer color, seller description, or a jumper alone. See the [ZB25VQ64 product information](https://www.gdzhianxin.com/index.php?a=show&c=index&catid=108&id=91&m=content).
-2. Measure the CH341 adapter's VCC and SPI logic levels before attaching the flash. CH341A boards and clip adapters have multiple revisions and clones. Use a proper level/voltage adapter if the measured levels do not match the exact flash datasheet.
+2. With no camera or clip attached, perform the pin-28 voltage check described above. Also measure the programmer's flash `VCC` output and, if possible, its SPI logic-high levels. Use a proper level/voltage adapter if any measured level does not match the exact flash datasheet.
 3. Disconnect the camera's USB cable and every other source of board power. Do not power the camera normally while the programmer supplies the flash. If your successful read setup uses a different, independently verified power arrangement, reproduce that exact arrangement; never connect two power sources blindly.
 4. Connect the clip before plugging the CH341 programmer into USB. Align the clip's pin-1/red-stripe conductor with the flash's pin-1 dot/notch, and place the adapter in the programmer's **25-series SPI** position, not the 24-series I²C position.
 
@@ -232,6 +217,14 @@ Only after the tool reports a byte-for-byte match should you unplug the CH341 pr
 
 NeoProgrammer's labels can vary slightly by release, but the required operation order does not: **three stable reads → build → full-chip erase → blank check → program → internal verify → full readback → tool verify**. NeoProgrammer describes the same backup/erase/write/verify capabilities in its [software overview](https://neoprogrammer.org/).
 
+### Alternative: flashrom with a Bus Pirate
+
+The generated `FLASHING.txt` also contains a `flashrom` command for the Bus Pirate. Unlike the NeoProgrammer workflow, it writes only the regions reported as changed and deliberately does not enable programmer-supplied target power.
+
+In-circuit Bus Pirate access may not work on this camera because the rest of the board can interfere with the SPI bus. In the tested setup, the CH341 worked with the flash still soldered to the board, while the Bus Pirate worked only after the chip was unsoldered. Do not interpret unstable or failed reads as permission to write: obtain three identical full dumps first, or switch to the CH341 approach.
+
+If you do use a Bus Pirate, independently verify the exact flash voltage, pinout, wiring, and power arrangement. Never power the camera normally while the programmer is connected unless you have explicitly designed and verified that arrangement.
+
 ## Readback verification
 
 After writing, make a full 8 MiB readback without disturbing the programmer connection. Then run:
@@ -244,7 +237,54 @@ Success is reported only when the files are byte-for-byte identical.
 
 `verify` first requires the expected file to be a strict, patched, canonical recovery image, then requires the full readback to be byte-for-byte identical.
 
-The generated Bus Pirate command uses only current documented `dev` and `spispeed` parameters and deliberately does not enable programmer-supplied power. Verify the exact flash voltage and wiring independently. Never connect normal device/USB power and programmer target power simultaneously.
+Only disconnect the programmer and attempt a normal boot after this comparison succeeds. Never connect normal camera/USB power and programmer target power simultaneously.
+
+## Supported image family
+
+This release intentionally accepts only the exact firmware family already verified in two independent camera dumps with different unit identities:
+
+- 8 MiB `ZB25VQ64` SPI NOR
+- Ingenic T23N
+- Linux `3.10.14__isvp_pike_1.0__`
+- kernel build dated 2025-12-03
+- Jovision `ucamera` v1.1.83
+- partition layout:
+
+```text
+0x000000–0x03FFFF  boot
+0x040000–0x18FFFF  kernel
+0x190000–0x2E7FFF  root
+0x2E8000–0x7CFFFF  system
+0x7D0000–0x7DFFFF  HWCONFIG
+0x7E0000–0x7FFFFF  config
+```
+
+There is no override or `--force` option for a mismatching firmware build. A refusal is a safety feature: do not weaken the checks or copy a reference camera's complete image over an unsupported unit.
+
+## How validation handles different camera identities
+
+A complete raw dump cannot be compared by ignoring only the visible serial string. JFFS2 appends new nodes on each boot, so two otherwise identical cameras naturally have different raw `config` histories. The HWCONFIG partition also contains a per-unit UOID and an associated two-byte value.
+
+The validator therefore performs the strongest safe equivalent of “100% match apart from unit data”:
+
+1. Every firmware byte that should be invariant must match the two independently obtained references exactly.
+2. The 32 KiB SquashFS window containing `bashrc.sh` must equal either the exact stock hash or the exact audited patched hash.
+3. Only these unit-specific or mutable fields are excluded from the invariant hash:
+
+```text
+0x7D200B–0x7D200C  two-byte HWCONFIG unit check value
+0x7D2011–0x7D206E  94-byte HWCONFIG UOID
+0x7E0000–0x7FFFFF  writable JFFS2 config log
+```
+
+4. The excluded fields are still validated:
+   - the UOID must have the expected 94-byte structure;
+   - `config` must contain CRC-valid JFFS2 nodes;
+   - only the six known filenames are accepted;
+   - exactly one unambiguous `serial.cfg` value must be recoverable;
+   - the serial and UOID must share the expected 12-byte unit prefix.
+
+No other differences are accepted. See `REFERENCE_FINGERPRINTS.json`.
 
 ## Safety properties
 
