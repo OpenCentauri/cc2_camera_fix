@@ -4,6 +4,8 @@ This project can recover a stock Elegoo Centauri Carbon 2 camera that no longer 
 
 The repair is designed to preserve the identity of **your** camera. It starts from your own flash dump; there is no generic firmware image in this repository and you should not write another camera's dump to your device.
 
+> **AI-development note:** This fix was developed with the assistance of AI. It has produced the expected result in two tested cases, but if you have any doubts, independently audit the script before using it on your hardware.
+
 ## Why the stock camera stops working
 
 The stock camera is a small Linux computer, not just an image sensor. Its firmware has a writable 128 KiB JFFS2 `config` partition. During every boot, the vendor startup script unconditionally copies the same five default configuration files into that partition again.
@@ -21,7 +23,7 @@ A missing image does not by itself prove that the camera flash is corrupted. Iso
 
 1. Power the printer off and unplug it from mains power.
 2. Unscrew the stock camera module and unplug its four-wire cable from the printer. Do not work on the connector while the printer is powered.
-3. Reassemble or secure everything sufficiently that no loose conductor can short, then power the printer back on without the stock camera connected.
+3. Power the printer back on with the stock camera disconnected.
 4. Connect a known-working, ordinary USB webcam to the printer's front USB port.
 5. If that webcam produces a feed, the printer mainboard, software, and USB-camera path are working; failure of the stock camera module is then likely. If the replacement webcam also fails, diagnose the printer side before attempting this repair.
 
