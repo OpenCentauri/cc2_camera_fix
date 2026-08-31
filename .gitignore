@@ -1,13 +1,19 @@
-# Python cache and local tooling state
+# Python environments, caches, and build output
+.venv/
+venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+*.egg-info/
+build/
+dist/
 
 # Raw flash images and generated recovery artifacts may contain device-specific
 # data such as serial numbers. Keep them out of source control by default.
 *.bin
 *.rom
 *.img
+*.dump
 *.zip
 *-cc2-recovery/
 
