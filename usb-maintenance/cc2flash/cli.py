@@ -25,6 +25,7 @@ from .hid_transport import (
     expected_devices,
     install_adb_startup,
     restore_blob,
+    start_adb_through_upload_command,
     wait_for_hid,
 )
 from .protocol import (
@@ -82,10 +83,25 @@ def command_info(args) -> int:
 
 def command_backup(args) -> int:
     output = Path(args.output)
+    adb = _adb(args)
     try:
-        image, manifest = acquire_twice(_adb(args))
+        image, manifest = acquire_twice(adb)
     except AdbUnavailable as exc:
-        return _bootstrap_adb_for_backup(args, exc)
+        if not args.start_adb_through_upload_command:
+            return _bootstrap_adb_for_backup(args, exc)
+        print(f"ADB is unavailable: {exc}", file=sys.stderr)
+        print(
+            "Starting /bin/adbd once through the normal-HID upload command. "
+            "No persistent startup file will be installed.",
+            file=sys.stderr,
+        )
+        start_adb_through_upload_command()
+        print(
+            "The upload commit is expected to report failure or disconnect; "
+            "waiting for ADB."
+        )
+        adb.wait_for_device(timeout=args.adb_startup_timeout)
+        image, manifest = acquire_twice(adb)
     manifest_path = save_backup(output, image, manifest)
     print("Backup complete (two identical full reads)")
     print(f"Size:   {manifest['size']}")
@@ -240,13 +256,28 @@ def parser() -> argparse.ArgumentParser:
         help="read flash twice; offer normal-HID ADB startup recovery if absent",
     )
     backup.add_argument("output")
-    backup.add_argument(
+    bootstrap_group = backup.add_mutually_exclusive_group()
+    bootstrap_group.add_argument(
         "--bootstrap-adb",
         action="store_true",
         help=(
             "if no ADB device is connected, overwrite /etc/conf.d/system.sh "
             "with '/bin/adbd &' without an interactive prompt"
         ),
+    )
+    bootstrap_group.add_argument(
+        "--start-adb-through-upload-command",
+        action="store_true",
+        help=(
+            "if ADB is absent, start /bin/adbd for this boot through the "
+            "normal-HID uploader's command-injection bug, then continue backup"
+        ),
+    )
+    backup.add_argument(
+        "--adb-startup-timeout",
+        type=float,
+        default=30,
+        help="seconds to wait for ADB after temporary HID startup (default: 30)",
     )
     backup.set_defaults(func=command_backup)
 

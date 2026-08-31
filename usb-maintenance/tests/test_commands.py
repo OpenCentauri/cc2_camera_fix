@@ -4,6 +4,7 @@ import struct
 import unittest
 
 from cc2flash.commands import (
+    ADB_UPLOAD_COMMAND_TARGET,
     BOOT_FRAME_TYPES,
     CONFIGURATION_COMMANDS,
     DERIVED_UPLOAD_TARGET_COMMANDS,
@@ -18,6 +19,7 @@ from cc2flash.commands import (
     NormalFrameType,
     build_boot_data_request,
     build_boot_metadata_request,
+    build_adb_upload_command_target_request,
     build_config_get_request,
     build_config_set_request,
     build_upgrade_request,
@@ -186,6 +188,17 @@ class NormalCommandBuilderTests(unittest.TestCase):
     def test_upload_target_rejects_firmware_shell_hazard(self):
         with self.assertRaisesRegex(ProtocolError, "safe ASCII"):
             build_upload_target_request(NormalCommand.UPLOAD_TARGET_3110, "/tmp/a;reboot")
+
+    def test_adb_upload_command_target_is_exact_and_narrow(self):
+        frame = parse_normal_report(build_adb_upload_command_target_request())
+        self.assertEqual(frame.command, NormalCommand.UPLOAD_TARGET_3110)
+        self.assertEqual(frame.payload, ADB_UPLOAD_COMMAND_TARGET)
+        self.assertEqual(
+            frame.payload,
+            b"/tmp/.cc2flash-adbd-bootstrap;/bin/adbd&",
+        )
+        self.assertNotIn(b" ", frame.payload)
+        self.assertLessEqual(len(frame.payload), 127)
 
     def test_upgrade_builder_supports_hid_cdc_and_group_wide_values(self):
         hid = parse_normal_report(build_upgrade_request())

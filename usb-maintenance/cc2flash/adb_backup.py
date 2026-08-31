@@ -110,6 +110,18 @@ class AdbClient:
     def exec_out(self, *remote_args: str, timeout: float = 30) -> bytes:
         return self.run("exec-out", *remote_args, timeout=timeout)
 
+    def wait_for_device(self, *, timeout: float) -> None:
+        """Wait for an ADB transport, then require the selected device state.
+
+        ``adb wait-for-device`` is portable across the supported host platforms
+        and naturally spans the camera's possible USB re-enumeration.  The
+        follow-up state check preserves the existing refusal for unauthorized,
+        ambiguous, offline, or otherwise unusable transports.
+        """
+
+        self.run("wait-for-device", timeout=timeout)
+        self.ensure_available()
+
     def ensure_available(self) -> None:
         """Distinguish an absent device from local ADB/setup errors.
 

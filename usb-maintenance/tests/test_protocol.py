@@ -285,6 +285,80 @@ class HidStateMachineTests(unittest.TestCase):
             with self.assertRaisesRegex(ProtocolError, "status=1"):
                 hid_transport.install_adb_startup()
 
+    def test_temporary_adb_upload_command_expects_commit_failure(self):
+        replies = [
+            normal_response(0x3000),
+            normal_response(0x3110),
+            normal_response(0x3200),
+            normal_response(0x3300, status=1),
+        ]
+
+        class FakeHandle:
+            instance = None
+
+            def __init__(self, vid, pid):
+                self.vid_pid = (vid, pid)
+                self.writes = []
+                FakeHandle.instance = self
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def write_exact(self, report):
+                self.writes.append(report)
+
+            def read(self, _size, _timeout):
+                return replies.pop(0)
+
+        with mock.patch.object(hid_transport, "HidHandle", FakeHandle):
+            hid_transport.start_adb_through_upload_command()
+
+        self.assertFalse(replies)
+        frames = [parse_normal_report(item) for item in FakeHandle.instance.writes]
+        self.assertEqual([item.command for item in frames], [0x3000, 0x3110, 0x3200, 0x3300])
+        self.assertEqual(
+            frames[1].payload,
+            b"/tmp/.cc2flash-adbd-bootstrap;/bin/adbd&",
+        )
+        self.assertEqual((frames[2].payload, frames[2].frame_type), (b"\n", 2))
+
+    def test_temporary_adb_upload_command_tolerates_commit_disconnect_only(self):
+        class FakeHandle:
+            def __init__(self, _vid, _pid):
+                self.writes = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def write_exact(self, report):
+                self.writes.append(report)
+
+            def read(self, _size, _timeout):
+                request = parse_normal_report(self.writes[-1])
+                if request.command == 0x3300:
+                    raise OSError("USB re-enumerated")
+                return normal_response(request.command)
+
+        with mock.patch.object(hid_transport, "HidHandle", FakeHandle):
+            hid_transport.start_adb_through_upload_command()
+
+        class EarlyFailureHandle(FakeHandle):
+            def read(self, _size, _timeout):
+                request = parse_normal_report(self.writes[-1])
+                if request.command == 0x3110:
+                    raise OSError("target exchange failed")
+                return normal_response(request.command)
+
+        with mock.patch.object(hid_transport, "HidHandle", EarlyFailureHandle):
+            with self.assertRaisesRegex(OSError, "target exchange"):
+                hid_transport.start_adb_through_upload_command()
+
     def test_small_restore_state_machine(self):
         image = bytes(range(256)) * 2
         blob, plan = build_update_blob(image)
@@ -403,6 +477,57 @@ class CliBootstrapTests(unittest.TestCase):
         self.assertIn("No flash was read", stdout.getvalue())
         self.assertIn("restart", stdout.getvalue().casefold())
         self.assertIn("overwrite /etc/conf.d/system.sh", stderr.getvalue())
+
+    def test_temporary_upload_command_starts_adb_and_continues_backup(self):
+        image = b"image"
+        manifest = {
+            "size": len(image),
+            "sha256": hashlib.sha256(image).hexdigest(),
+            "md5": hashlib.md5(image).hexdigest(),
+        }
+        fake_adb = mock.Mock()
+        with (
+            mock.patch.object(cli, "_adb", return_value=fake_adb),
+            mock.patch.object(
+                cli,
+                "acquire_twice",
+                side_effect=[AdbUnavailable("no ADB device"), (image, manifest)],
+            ),
+            mock.patch.object(cli, "start_adb_through_upload_command") as start,
+            mock.patch.object(cli, "install_adb_startup") as persistent,
+            mock.patch.object(cli, "save_backup", return_value=Path("backup.bin.json")) as save,
+            redirect_stdout(io.StringIO()),
+            redirect_stderr(io.StringIO()),
+        ):
+            status = cli.main(
+                [
+                    "backup",
+                    "backup.bin",
+                    "--start-adb-through-upload-command",
+                    "--adb-startup-timeout",
+                    "7",
+                ]
+            )
+        self.assertEqual(status, 0)
+        start.assert_called_once_with()
+        persistent.assert_not_called()
+        fake_adb.wait_for_device.assert_called_once_with(timeout=7.0)
+        save.assert_called_once_with(Path("backup.bin"), image, manifest)
+
+    def test_temporary_upload_command_does_not_mask_other_adb_errors(self):
+        with (
+            mock.patch.object(
+                cli, "acquire_twice", side_effect=ProtocolError("ADB shell is not root")
+            ),
+            mock.patch.object(cli, "start_adb_through_upload_command") as start,
+            redirect_stdout(io.StringIO()),
+            redirect_stderr(io.StringIO()),
+        ):
+            status = cli.main(
+                ["backup", "backup.bin", "--start-adb-through-upload-command"]
+            )
+        self.assertEqual(status, 2)
+        start.assert_not_called()
 
     def test_noninteractive_bootstrap_requires_explicit_option(self):
         stdout = io.StringIO()
