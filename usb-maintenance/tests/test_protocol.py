@@ -226,6 +226,51 @@ class BackupTests(unittest.TestCase):
             with self.assertRaisesRegex(AdbUnavailable, "not online"):
                 AdbClient().ensure_available()
 
+    def test_wait_for_device_retries_closed_and_offline_until_online(self):
+        client = AdbClient()
+        states = [
+            ProtocolError("ADB device is not usable (error: closed)"),
+            AdbUnavailable("ADB camera is not online (error: device offline)"),
+            None,
+        ]
+        with (
+            mock.patch.object(client, "ensure_available", side_effect=states) as check,
+            mock.patch("cc2flash.adb_backup.time.sleep") as sleep,
+        ):
+            client.wait_for_device(timeout=30)
+        self.assertEqual(check.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_wait_for_device_does_not_retry_unrelated_adb_failure(self):
+        client = AdbClient()
+        with (
+            mock.patch.object(
+                client,
+                "ensure_available",
+                side_effect=ProtocolError("ADB device is not usable (unauthorized)"),
+            ) as check,
+            mock.patch("cc2flash.adb_backup.time.sleep") as sleep,
+            self.assertRaisesRegex(ProtocolError, "unauthorized"),
+        ):
+            client.wait_for_device(timeout=30)
+        check.assert_called_once_with()
+        sleep.assert_not_called()
+
+    def test_wait_for_device_timeout_reports_last_transition_state(self):
+        client = AdbClient()
+        with (
+            mock.patch.object(
+                client,
+                "ensure_available",
+                side_effect=AdbUnavailable("ADB camera is not online (offline)"),
+            ),
+            mock.patch("cc2flash.adb_backup.time.monotonic", side_effect=[10.0, 11.0]),
+            mock.patch("cc2flash.adb_backup.time.sleep") as sleep,
+            self.assertRaisesRegex(ProtocolError, "last state:.*offline"),
+        ):
+            client.wait_for_device(timeout=1)
+        sleep.assert_not_called()
+
     def test_adb_ambiguity_does_not_enable_bootstrap(self):
         result = SimpleNamespace(
             returncode=1,

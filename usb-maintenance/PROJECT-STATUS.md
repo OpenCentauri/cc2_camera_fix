@@ -36,7 +36,7 @@
 
 ## Client status
 
-The included Python client is now v0.4.0 with 47 passing offline tests. Its
+The included Python client is now v0.4.0 with 50 passing offline tests. Its
 two-pass backup path is implemented, including both the temporary upload-command
 ADB start and the guarded persistent ADB-startup fallback.
 The restore path now parses type-2 payloads as the next expected absolute packet
@@ -69,10 +69,11 @@ malformed-device states remain refusals.
   that every flash byte remains unchanged during a live boot.
 - The device owner manually verified that `/etc/conf.d/system.sh` containing
   `/bin/adbd &` starts ADB on the next boot. The client-generated HID transaction
-  remains hardware-unverified in this work.
+  for that persistent path remains hardware-unverified in this work.
 - The temporary upload-command ADB start is derived from the reconstructed
-  `hid_update` control flow and is offline-tested, but has not yet been exercised
-  on a physical camera.
+  `hid_update` control flow. Its first physical-camera test successfully started
+  `/bin/adbd` and allowed `adb shell`; the Windows host exposed a now-corrected
+  retry bug by returning `error: closed` from the old USB transport first.
 
 The authoritative protocol and full command catalog are in `PROTOCOL.md`; static
 anchors and hashes are in `EVIDENCE.md`. The human-readable reconstruction and

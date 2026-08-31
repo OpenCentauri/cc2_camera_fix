@@ -146,8 +146,11 @@ rm /tmp/.cc2flash-adbd-bootstrap;/bin/adbd&
 before attempting to open the complete target as a literal pathname. That open
 is expected to fail because the semicolon-suffixed tmpfs component is not a
 directory. A status-1 reply or HID disconnect after `0x3300` is therefore not
-used as the success signal; the client waits up to 30 seconds for ADB and only
-then begins the normal two-pass acquisition. Earlier upload failures remain
+used as the success signal. Live Windows testing showed that the old USB
+transport can first return `error: closed` even though the newly started daemon
+already accepts `adb shell`. The client polls through that exact transition,
+stock `offline`, and temporary absence for up to 30 seconds, then begins the
+normal two-pass acquisition. Other ADB errors and earlier upload failures remain
 fatal. Override the wait only when necessary:
 
 ```sh
@@ -280,9 +283,10 @@ See [PROTOCOL.md](PROTOCOL.md) for the recovered wire formats and
 python -m unittest discover -s tests -v
 ```
 
-The 47 tests exercise the 57-entry normal command catalog, all configuration and
+The 50 tests exercise the 57-entry normal command catalog, all configuration and
 upload mappings, command builders, U-Boot frame types/ACK decoders, frame
 vectors, checksums, image headers, packet numbering, partition validation, ADB
 absence/offline/error classification, backup-manifest enforcement, both ADB startup mechanisms,
-expected final-commit failure/disconnection, CLI mutation guards, and the HID
+expected final-commit failure/disconnection, the Windows `error: closed`
+transport handoff, CLI mutation guards, and the HID
 state machines without opening a device.

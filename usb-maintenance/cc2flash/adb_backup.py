@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import time
 
 from .protocol import FLASH_SIZE, ProtocolError
 
@@ -117,18 +118,48 @@ class AdbClient:
         return self.run("exec-out", *remote_args, timeout=timeout)
 
     def wait_for_device(self, *, timeout: float) -> None:
-        """Wait for an ADB transport, then require the selected device state.
+        """Poll across the normal-HID-to-ADB USB transport transition.
 
-        ``adb wait-for-device`` is portable across the supported host platforms
-        and naturally spans the camera's possible USB re-enumeration.  The
-        follow-up state check preserves the existing refusal for unauthorized,
-        ambiguous, or otherwise unusable transports.  The stock pre-daemon
-        ``offline`` state is startup-eligible before this wait, but remains an
-        error if the selected startup method fails to bring ADB online.
+        Live Windows testing established that the successful HID injection
+        closes the old composite-device transport.  During that expected
+        handoff, ``adb wait-for-device`` may exit immediately with
+        ``error: closed`` even though the newly started daemon subsequently
+        becomes usable.  Polling ``get-state`` through :meth:`ensure_available`
+        avoids treating that one old-transport result as terminal.
+
+        Only three transition states are retried: absent, stock ``offline``,
+        and the exact ADB ``error: closed`` result.  Authorization, device
+        ambiguity, missing executables, and every other setup error still abort
+        immediately.  The caller's deadline bounds the whole transition.
         """
 
-        self.run("wait-for-device", timeout=timeout)
-        self.ensure_available()
+        deadline = time.monotonic() + timeout
+        last_state = "ADB has not been checked"
+        while True:
+            try:
+                self.ensure_available()
+                return
+            except AdbUnavailable as exc:
+                last_state = str(exc)
+            except ProtocolError as exc:
+                # ``ensure_available`` deliberately does not classify a closed
+                # transport as generally startup-eligible: doing so before an
+                # explicit HID action could trigger an unnecessary device
+                # mutation.  It is transient only here, after that action.
+                if (
+                    "adb device is not usable (error: closed)"
+                    not in str(exc).casefold()
+                ):
+                    raise
+                last_state = str(exc)
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ProtocolError(
+                    "timed out waiting for ADB to become online; "
+                    f"last state: {last_state}"
+                )
+            time.sleep(min(0.5, remaining))
 
     def ensure_available(self) -> None:
         """Distinguish an absent device from local ADB/setup errors.

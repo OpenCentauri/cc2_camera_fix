@@ -659,9 +659,14 @@ background. The subsequent literal path contains `/bin/adbd&` below a normally
 nonexistent `/tmp/.cc2flash-adbd-bootstrap;` directory, so `fopen` fails and the
 later unquoted `chmod` is not reached. This produces a normal status-1 commit
 reply; USB gadget changes may instead remove HID before the reply is readable.
-The client accepts failure/timeout/disconnection only for that final exchange,
-waits for `adb wait-for-device`, revalidates the selected device state, and then
-performs the ordinary two-pass MTD acquisition in the same invocation.
+The client accepts failure/timeout/disconnection only for that final exchange.
+Live Windows testing confirmed that `/bin/adbd` starts and accepts `adb shell`,
+but also showed that the old ADB transport can close during the USB transition;
+in that case `adb wait-for-device` exits immediately with `error: closed`.
+The client therefore polls the selected device until it is online, tolerating
+only absent, stock `offline`, and exact `error: closed` transition states within
+the bounded startup timeout. It then performs the ordinary two-pass MTD
+acquisition in the same invocation.
 
 No persistent startup file is created. The handler still executes `sync` after
 the shell command, so normal firmware writes already pending against JFFS2 may
@@ -699,8 +704,8 @@ This is a solderless recovery path, but it is intentionally **not read-only**:
 - normal HID provides no file download or content verification;
 - the success response establishes only that the daemon-side write path returned
   success; and
-- the client-generated four-command transaction has offline tests but no
-  physical USB capture in this work.
+- the client-generated four-command persistent transaction has offline tests
+  but no physical USB capture in this work.
 
 The later root ADB partition reads provide flash readback, but they do not recover
 the previous contents of `system.sh` after it has been overwritten. Direct SPI
@@ -713,7 +718,7 @@ required before any mutation.
 |---|---|---|---|
 | Bootloader data ACK | parses `u32le(next_expected_packet)` and requires the next in-order value; aborts on retry request | payload is the next expected packet, including a batch restart after an error | Wire-aligned for in-order packets; retransmission and hardware validation remain |
 | Backup startup | installs `/etc/conf.d/system.sh` through guarded normal HID when ADB is absent | `rcS` executes the persistent hook next boot | Implemented and offline-tested; manual hook behavior runtime-verified |
-| Temporary ADB start | explicit flag sends an immutable no-space upload target, tolerates only final-commit failure/disconnect, then waits for ADB and reads twice | unquoted `rm` target starts `/bin/adbd`; literal `fopen` then fails | Implemented and offline-tested; physical transaction unverified |
+| Temporary ADB start | explicit flag sends an immutable no-space upload target, tolerates only final-commit failure/disconnect, polls across the old transport closing, then reads twice | unquoted `rm` target starts `/bin/adbd`; literal `fopen` then fails | Physical startup and `adb shell` verified on Windows; automatic two-pass continuation awaits retest |
 | Public Python catalog | exposes all 57 exact normal commands, every `0x4xxx` match, and boot types 1/2/3/5 with builders/decoders | complete analyzed dispatcher/state-machine surface | Implemented with source comments and exhaustive offline mapping tests |
 
 The protocol builder, MD5 header, packet numbering, range checks, and
