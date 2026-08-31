@@ -621,10 +621,14 @@ owner runtime-verified this by manual file creation. The boot hook and binary
 location are independently confirmed in the supplied image.
 
 The current client integrates two explicit startup options into `backup`. It
-first checks `adb get-state`. Only a genuinely absent selected device is
-eligible for either option. A missing local ADB executable, timeout, multiple or
-unauthorized devices, a non-root shell, malformed partition map, failed/short
-read, or two-pass mismatch does not enter either HID startup path.
+first checks `adb get-state`. Without any setup, the stock gadget always exposes
+an ADB USB transport without a running daemon, so the pre-daemon host state is
+`Ucamera001 offline`, not an absent device. The client classifies both that exact
+offline state and a genuinely absent selected device as eligible for either the
+temporary or persistent startup mechanism. A missing local ADB executable,
+timeout, multiple or unauthorized devices, a non-root shell, malformed
+partition map, failed/short read, or two-pass mismatch does not enter either HID
+startup path.
 
 ### 9.1 Temporary upload-command start
 

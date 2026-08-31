@@ -261,7 +261,8 @@ def parser() -> argparse.ArgumentParser:
         "--bootstrap-adb",
         action="store_true",
         help=(
-            "if no ADB device is connected, overwrite /etc/conf.d/system.sh "
+            "if the stock ADB interface is offline or absent, overwrite "
+            "/etc/conf.d/system.sh "
             "with '/bin/adbd &' without an interactive prompt"
         ),
     )
@@ -269,8 +270,9 @@ def parser() -> argparse.ArgumentParser:
         "--start-adb-through-upload-command",
         action="store_true",
         help=(
-            "if ADB is absent, start /bin/adbd for this boot through the "
-            "normal-HID uploader's command-injection bug, then continue backup"
+            "if the stock ADB interface is offline or absent, start /bin/adbd "
+            "for this boot through the normal-HID uploader's command-injection "
+            "bug, then continue backup"
         ),
     )
     backup.add_argument(

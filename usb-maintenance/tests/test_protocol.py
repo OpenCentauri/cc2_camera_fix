@@ -216,6 +216,16 @@ class BackupTests(unittest.TestCase):
             with self.assertRaises(AdbUnavailable):
                 AdbClient().ensure_available()
 
+    def test_adb_offline_is_distinguished_for_bootstrap(self):
+        result = SimpleNamespace(
+            returncode=1,
+            stdout=b"",
+            stderr=b"error: device offline\n",
+        )
+        with mock.patch("cc2flash.adb_backup.subprocess.run", return_value=result):
+            with self.assertRaisesRegex(AdbUnavailable, "not online"):
+                AdbClient().ensure_available()
+
     def test_adb_ambiguity_does_not_enable_bootstrap(self):
         result = SimpleNamespace(
             returncode=1,
@@ -430,7 +440,7 @@ class CliBootstrapTests(unittest.TestCase):
         interactive_stdin = SimpleNamespace(isatty=lambda: True)
         with (
             mock.patch.object(
-                cli, "acquire_twice", side_effect=AdbUnavailable("no ADB device")
+                cli, "acquire_twice", side_effect=AdbUnavailable("device offline")
             ),
             mock.patch.object(cli, "install_adb_startup") as install,
             mock.patch.object(sys, "stdin", interactive_stdin),
@@ -446,7 +456,7 @@ class CliBootstrapTests(unittest.TestCase):
         interactive_stdin = SimpleNamespace(isatty=lambda: True)
         with (
             mock.patch.object(
-                cli, "acquire_twice", side_effect=AdbUnavailable("no ADB device")
+                cli, "acquire_twice", side_effect=AdbUnavailable("device offline")
             ),
             mock.patch.object(cli, "install_adb_startup") as install,
             mock.patch.object(sys, "stdin", interactive_stdin),
@@ -463,7 +473,7 @@ class CliBootstrapTests(unittest.TestCase):
         stderr = io.StringIO()
         with (
             mock.patch.object(
-                cli, "acquire_twice", side_effect=AdbUnavailable("no ADB device")
+                cli, "acquire_twice", side_effect=AdbUnavailable("device offline")
             ),
             mock.patch.object(cli, "install_adb_startup") as install,
             mock.patch.object(cli, "save_backup") as save,
@@ -491,7 +501,7 @@ class CliBootstrapTests(unittest.TestCase):
             mock.patch.object(
                 cli,
                 "acquire_twice",
-                side_effect=[AdbUnavailable("no ADB device"), (image, manifest)],
+                side_effect=[AdbUnavailable("device offline"), (image, manifest)],
             ),
             mock.patch.object(cli, "start_adb_through_upload_command") as start,
             mock.patch.object(cli, "install_adb_startup") as persistent,
@@ -534,7 +544,7 @@ class CliBootstrapTests(unittest.TestCase):
         stderr = io.StringIO()
         with (
             mock.patch.object(
-                cli, "acquire_twice", side_effect=AdbUnavailable("no ADB device")
+                cli, "acquire_twice", side_effect=AdbUnavailable("device offline")
             ),
             mock.patch.object(cli, "install_adb_startup") as install,
             mock.patch.object(sys, "stdin", io.StringIO()),

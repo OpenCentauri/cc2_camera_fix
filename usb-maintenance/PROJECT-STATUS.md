@@ -36,7 +36,7 @@
 
 ## Client status
 
-The included Python client is now v0.4.0 with 46 passing offline tests. Its
+The included Python client is now v0.4.0 with 47 passing offline tests. Its
 two-pass backup path is implemented, including both the temporary upload-command
 ADB start and the guarded persistent ADB-startup fallback.
 The restore path now parses type-2 payloads as the next expected absolute packet
@@ -51,6 +51,12 @@ pairs, all 13 uploader commands, all four U-Boot frame types, group-wide
 `3000 → 3110 → 3200(final) → 3300` ADB-startup upload, interactive guards, and
 the temporary command-injection transaction and the prior backup/image safety
 checks.
+
+Without any setup, the stock USB gadget always enumerates an ADB transport as
+`offline` until `adbd` starts. The availability classifier treats that exact
+state, as well as a genuinely absent device, as eligible for both the temporary
+and persistent startup mechanisms. Ambiguous, unauthorized, non-root, and
+malformed-device states remain refusals.
 
 ## Hardware status
 

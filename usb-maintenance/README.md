@@ -121,9 +121,15 @@ cc2flash info
 cc2flash backup backup.bin
 ```
 
-If ADB is already available, `backup` proceeds without a normal-HID write. If
-you want to start the installed daemon only for this boot and continue directly
-into the read, opt in explicitly:
+Without any setup and before `adbd` starts, the stock camera always exposes its
+USB ADB function and appears in `adb devices` as `Ucamera001 offline`. The client
+treats that exact offline state like an absent transport for both startup
+mechanisms; it does not treat ambiguity, authorization errors, or other ADB
+failures the same way.
+
+If ADB is already online, `backup` proceeds without a normal-HID write. To start
+the installed daemon only for this boot and continue directly into the read,
+opt in explicitly:
 
 ```sh
 cc2flash backup backup.bin --start-adb-through-upload-command
@@ -274,9 +280,9 @@ See [PROTOCOL.md](PROTOCOL.md) for the recovered wire formats and
 python -m unittest discover -s tests -v
 ```
 
-The 46 tests exercise the 57-entry normal command catalog, all configuration and
+The 47 tests exercise the 57-entry normal command catalog, all configuration and
 upload mappings, command builders, U-Boot frame types/ACK decoders, frame
 vectors, checksums, image headers, packet numbering, partition validation, ADB
-error classification, backup-manifest enforcement, both ADB startup mechanisms,
+absence/offline/error classification, backup-manifest enforcement, both ADB startup mechanisms,
 expected final-commit failure/disconnection, CLI mutation guards, and the HID
 state machines without opening a device.

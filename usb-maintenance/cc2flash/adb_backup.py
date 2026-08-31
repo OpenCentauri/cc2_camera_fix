@@ -15,7 +15,13 @@ from .protocol import FLASH_SIZE, ProtocolError
 
 
 class AdbUnavailable(ProtocolError):
-    """No selected ADB device is connected in the usable ``device`` state."""
+    """The selected camera has no usable daemon-backed ADB transport yet.
+
+    Stock firmware exposes the USB ADB function before ``adbd`` is started, so
+    the camera appears as ``offline`` rather than disappearing from
+    ``adb devices``.  Both that exact state and a genuinely absent device are
+    eligible for an explicitly guarded HID startup path.
+    """
 
 
 EXPECTED_PARTITIONS = (
@@ -116,7 +122,9 @@ class AdbClient:
         ``adb wait-for-device`` is portable across the supported host platforms
         and naturally spans the camera's possible USB re-enumeration.  The
         follow-up state check preserves the existing refusal for unauthorized,
-        ambiguous, offline, or otherwise unusable transports.
+        ambiguous, or otherwise unusable transports.  The stock pre-daemon
+        ``offline`` state is startup-eligible before this wait, but remains an
+        error if the selected startup method fails to bring ADB online.
         """
 
         self.run("wait-for-device", timeout=timeout)
@@ -125,10 +133,11 @@ class AdbClient:
     def ensure_available(self) -> None:
         """Distinguish an absent device from local ADB/setup errors.
 
-        Only ``AdbUnavailable`` is eligible for the normal-HID startup fallback.
-        Missing executables, ambiguous device selections, authorization errors,
-        and other local failures remain ordinary ``ProtocolError`` instances so
-        they cannot cause an unnecessary persistent-device write.
+        Only ``AdbUnavailable`` is eligible for a normal-HID startup fallback.
+        It covers both a genuinely absent camera and the stock camera's fixed
+        pre-daemon ``offline`` state. Missing executables, ambiguous selections,
+        authorization errors, and other local failures remain ordinary
+        ``ProtocolError`` instances so they cannot cause an unnecessary write.
         """
 
         command = self._base() + ["get-state"]
@@ -150,8 +159,10 @@ class AdbClient:
             "no devices" in lowered
             or ("device" in lowered and "not found" in lowered)
             or (self.serial is None and detail == "no device")
+            or "device offline" in lowered
+            or detail == "offline"
         ):
-            raise AdbUnavailable(f"no usable ADB camera is connected ({detail})")
+            raise AdbUnavailable(f"ADB camera is not online ({detail})")
         raise ProtocolError(f"ADB device is not usable ({detail})")
 
     def identity_and_partitions(self) -> tuple[str, list[MtdPartition]]:
