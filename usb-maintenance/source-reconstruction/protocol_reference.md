@@ -620,11 +620,55 @@ exact contents are `/bin/adbd &` starts the daemon at the next boot. The device
 owner runtime-verified this by manual file creation. The boot hook and binary
 location are independently confirmed in the supplied image.
 
-The current client integrates that fact into `backup`. It first checks `adb get-state`.
-Only a genuinely absent selected device is eligible for fallback. A missing
-local ADB executable, timeout, multiple or unauthorized devices, a non-root
-shell, malformed partition map, failed/short read, or two-pass mismatch does
-not enter the startup writer.
+The current client integrates two explicit startup options into `backup`. It
+first checks `adb get-state`. Only a genuinely absent selected device is
+eligible for either option. A missing local ADB executable, timeout, multiple or
+unauthorized devices, a non-root shell, malformed partition map, failed/short
+read, or two-pass mismatch does not enter either HID startup path.
+
+### 9.1 Temporary upload-command start
+
+`--start-adb-through-upload-command` uses two confirmed bugs without weakening
+the general upload-path API:
+
+1. literal targets are truncated only at the first ASCII space; and
+2. commit interpolates the remaining host-controlled target into unquoted
+   `system("rm %s")` before calling `fopen(target, "wb")`.
+
+The client sends this exact sequence:
+
+| Step | Command | Frame details | Effect |
+|---:|---:|---|---|
+| 1 | `0x3000` | type `1`, empty payload | allocate/reset upload state |
+| 2 | `0x3110` | type `1`, payload `/tmp/.cc2flash-adbd-bootstrap;/bin/adbd&` | select immutable no-space injection target |
+| 3 | `0x3200` | type `2`, sequence `0`, payload one newline byte | mark upload final/ready |
+| 4 | `0x3300` | type `1`, empty payload | execute injected `rm` shell line, then reach expected failing literal open |
+
+At step 4 the first shell command is exactly:
+
+```sh
+rm /tmp/.cc2flash-adbd-bootstrap;/bin/adbd&
+```
+
+The `rm` side addresses tmpfs and `/bin/adbd` is launched once in the
+background. The subsequent literal path contains `/bin/adbd&` below a normally
+nonexistent `/tmp/.cc2flash-adbd-bootstrap;` directory, so `fopen` fails and the
+later unquoted `chmod` is not reached. This produces a normal status-1 commit
+reply; USB gadget changes may instead remove HID before the reply is readable.
+The client accepts failure/timeout/disconnection only for that final exchange,
+waits for `adb wait-for-device`, revalidates the selected device state, and then
+performs the ordinary two-pass MTD acquisition in the same invocation.
+
+No persistent startup file is created. The handler still executes `sync` after
+the shell command, so normal firmware writes already pending against JFFS2 may
+be flushed; this mechanism specifically avoids adding the known
+`/etc/conf.d/system.sh` mutation rather than promising a quiescent flash.
+
+The uploader enters error state after the expected failed commit. If ADB does
+not appear, another attempt may require rebooting the camera to reset the
+uploader state.
+
+### 9.2 Persistent startup hook
 
 The fallback warns that it will overwrite an existing file, then requires either
 the interactive phrase `ENABLE-ADB` or the explicit noninteractive option
@@ -665,6 +709,7 @@ required before any mutation.
 |---|---|---|---|
 | Bootloader data ACK | parses `u32le(next_expected_packet)` and requires the next in-order value; aborts on retry request | payload is the next expected packet, including a batch restart after an error | Wire-aligned for in-order packets; retransmission and hardware validation remain |
 | Backup startup | installs `/etc/conf.d/system.sh` through guarded normal HID when ADB is absent | `rcS` executes the persistent hook next boot | Implemented and offline-tested; manual hook behavior runtime-verified |
+| Temporary ADB start | explicit flag sends an immutable no-space upload target, tolerates only final-commit failure/disconnect, then waits for ADB and reads twice | unquoted `rm` target starts `/bin/adbd`; literal `fopen` then fails | Implemented and offline-tested; physical transaction unverified |
 | Public Python catalog | exposes all 57 exact normal commands, every `0x4xxx` match, and boot types 1/2/3/5 with builders/decoders | complete analyzed dispatcher/state-machine surface | Implemented with source comments and exhaustive offline mapping tests |
 
 The protocol builder, MD5 header, packet numbering, range checks, and

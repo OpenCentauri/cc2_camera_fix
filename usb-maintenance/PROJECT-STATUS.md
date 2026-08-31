@@ -17,6 +17,9 @@
   optional `/etc/conf.d/system.sh` before mounting `/system`.
 - Integrated a guarded normal-HID fallback that installs the runtime-validated
   `/bin/adbd &` startup hook, stops, and requires a manual restart.
+- Added an explicit nonpersistent alternative that starts `/bin/adbd` through
+  the uploader's unquoted `rm` target, waits for ADB, and continues the two-pass
+  backup in the same invocation.
 - Corrected the bootloader ACK interpretation: type-2 payload is
   `u32le(next_expected_packet)`.
 - Reconstructed the complete update-relevant Linux daemon, SPL gate, and main
@@ -33,8 +36,9 @@
 
 ## Client status
 
-The included Python client is now v0.3.0 with 41 passing offline tests. Its
-two-pass backup path is implemented, including the guarded ADB-startup fallback.
+The included Python client is now v0.4.0 with 46 passing offline tests. Its
+two-pass backup path is implemented, including both the temporary upload-command
+ADB start and the guarded persistent ADB-startup fallback.
 The restore path now parses type-2 payloads as the next expected absolute packet
 and its two-packet mock proves the `ACK 0 → packet 0 → ACK 1 → final packet →
 type-5` sequence. It rejects a retransmission request with an explicit error;
@@ -45,17 +49,24 @@ The expanded tests verify exact catalog completeness, all 21 configuration
 pairs, all 13 uploader commands, all four U-Boot frame types, group-wide
 `0x4xxx` behavior, builders/decoders, the exact
 `3000 → 3110 → 3200(final) → 3300` ADB-startup upload, interactive guards, and
-the prior backup/image safety checks.
+the temporary command-injection transaction and the prior backup/image safety
+checks.
 
 ## Hardware status
 
 - No destructive camera write was performed in this analysis.
 - Normal and bootloader enumeration/timing have not been captured here.
-- No solderless, read-only flash acquisition command was found. The new route is
-  solderless but deliberately mutates the persistent config partition first.
+- No direct USB flash-read command was found. The temporary ADB route avoids
+  installing a persistent file: it attempts a tmpfs removal, starts `/bin/adbd`,
+  and then reaches the vendor's `sync` plus expected failing `fopen`. Normal
+  firmware activity may still have pending JFFS2 writes, so this is not a claim
+  that every flash byte remains unchanged during a live boot.
 - The device owner manually verified that `/etc/conf.d/system.sh` containing
   `/bin/adbd &` starts ADB on the next boot. The client-generated HID transaction
   remains hardware-unverified in this work.
+- The temporary upload-command ADB start is derived from the reconstructed
+  `hid_update` control flow and is offline-tested, but has not yet been exercised
+  on a physical camera.
 
 The authoritative protocol and full command catalog are in `PROTOCOL.md`; static
 anchors and hashes are in `EVIDENCE.md`. The human-readable reconstruction and

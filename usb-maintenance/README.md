@@ -13,11 +13,11 @@ the stock Elegoo Centauri Carbon 2 camera firmware found in the supplied
 The important result is that the bootloader USB updater is **write-only**. It
 does not implement a flash-read request. The included backup implementation
 instead reads `/dev/mtd0` through `/dev/mtd5` twice over root ADB. If ADB is
-absent, `backup` can use the normal-HID file uploader to overwrite
-`/etc/conf.d/system.sh` with `/bin/adbd &`; the root startup script executes that
-persistent hook on the next boot. This one-time recovery is a device mutation,
-not a read-only operation, and requires an explicit confirmation plus a manual
-restart before the backup can begin.
+absent, `backup --start-adb-through-upload-command` can start `/bin/adbd` for the
+current boot through the normal-HID uploader's unquoted shell command and then
+continue the read without restarting. The older `--bootstrap-adb` alternative
+overwrites `/etc/conf.d/system.sh` with `/bin/adbd &`; the root startup script
+executes that persistent hook on the next boot.
 
 This code was recovered by static analysis and tested offline against the
 provided dump. The startup hook itself was runtime-validated manually by the
@@ -122,8 +122,41 @@ cc2flash backup backup.bin
 ```
 
 If ADB is already available, `backup` proceeds without a normal-HID write. If
-no ADB device is connected, an interactive terminal prints the exact mutation
-and requires the literal confirmation `ENABLE-ADB`. It then sends:
+you want to start the installed daemon only for this boot and continue directly
+into the read, opt in explicitly:
+
+```sh
+cc2flash backup backup.bin --start-adb-through-upload-command
+```
+
+This sends `0x3000`, the immutable no-space target
+`/tmp/.cc2flash-adbd-bootstrap;/bin/adbd&` through `0x3110`, one harmless final
+newline through `0x3200`, and then `0x3300`. The vulnerable daemon executes:
+
+```sh
+rm /tmp/.cc2flash-adbd-bootstrap;/bin/adbd&
+```
+
+before attempting to open the complete target as a literal pathname. That open
+is expected to fail because the semicolon-suffixed tmpfs component is not a
+directory. A status-1 reply or HID disconnect after `0x3300` is therefore not
+used as the success signal; the client waits up to 30 seconds for ADB and only
+then begins the normal two-pass acquisition. Earlier upload failures remain
+fatal. Override the wait only when necessary:
+
+```sh
+cc2flash backup backup.bin --start-adb-through-upload-command \
+  --adb-startup-timeout 60
+```
+
+This route does not install a persistent file or require a restart. The vendor
+handler nevertheless calls `sync`, and the running stock firmware may already
+have pending JFFS2 changes, so it is not a guarantee that unrelated live-system
+writes never reach flash. It specifically avoids the known `system.sh` change.
+
+If the temporary route is not selected and no ADB device is connected, an
+interactive terminal prints the persistent mutation and requires the literal
+confirmation `ENABLE-ADB`. It then sends:
 
 1. `0x3000` — initialize the upload state;
 2. `0x3110` — select `/etc/conf.d/system.sh`;
@@ -144,6 +177,9 @@ This overwrites any existing `/etc/conf.d/system.sh`; the HID protocol cannot
 download or preserve the previous file. A missing local `adb` executable,
 multiple/unauthorized ADB devices, a non-root shell, or a wrong MTD map does not
 trigger the fallback.
+
+`--bootstrap-adb` and `--start-adb-through-upload-command` are mutually
+exclusive. Neither is used when the selected ADB device is already available.
 
 `backup` requires the exact recovered partition sequence and sizes:
 
@@ -216,8 +252,9 @@ image is then the intended recovery path.
 - No physical-camera test transcript is included yet.
 - Bootloader data ACK parsing now matches the disassembly for in-order packets,
   but automatic retransmission and physical-camera validation remain absent.
-- ADB recovery intentionally overwrites a persistent startup hook before the
-  first backup; there is no file readback or preservation command in normal HID.
+- The default/persistent ADB recovery overwrites a startup hook before the first
+  backup; the explicit upload-command route avoids that file but deliberately
+  relies on a vendor command-injection bug and remains hardware-unverified.
 - CDC transport is identified but not implemented; HID is the bootloader's
   default and the path used here.
 - Range writes are intentionally omitted.  Although the header accepts an
@@ -237,8 +274,9 @@ See [PROTOCOL.md](PROTOCOL.md) for the recovered wire formats and
 python -m unittest discover -s tests -v
 ```
 
-The 41 tests exercise the 57-entry normal command catalog, all configuration and
+The 46 tests exercise the 57-entry normal command catalog, all configuration and
 upload mappings, command builders, U-Boot frame types/ACK decoders, frame
 vectors, checksums, image headers, packet numbering, partition validation, ADB
-error classification, backup-manifest enforcement, the startup-file upload, CLI
-mutation guards, and the HID state machines without opening a device.
+error classification, backup-manifest enforcement, both ADB startup mechanisms,
+expected final-commit failure/disconnection, CLI mutation guards, and the HID
+state machines without opening a device.
