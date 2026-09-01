@@ -115,7 +115,38 @@ class AdbClient:
         return result.stdout
 
     def exec_out(self, *remote_args: str, timeout: float = 30) -> bytes:
+        """Run ADB's modern raw-output service.
+
+        This remains available to library callers, but the stock CC2 daemon
+        closes this service immediately.  Backup acquisition therefore uses
+        :meth:`shell` only for text and :meth:`pull` for binary MTD bytes.
+        """
+
         return self.run("exec-out", *remote_args, timeout=timeout)
+
+    def shell(self, *remote_args: str, timeout: float = 30) -> bytes:
+        """Run a text-only remote command through the legacy shell service."""
+
+        return self.run("shell", *remote_args, timeout=timeout)
+
+    def pull(self, remote_path: str, local_path: Path, *, timeout: float = 120) -> None:
+        """Copy one remote path through ADB's binary-safe sync service.
+
+        Live Windows testing against the stock daemon established that
+        ``exec-out`` returns ``error: closed``, while ``adb pull /dev/mtd4``
+        produced exactly 65,536 bytes whose local MD5 matched the camera's
+        ``md5sum /dev/mtd4``.  Explicit local files also keep binary data out of
+        terminal-oriented shell transports that may transform newlines.
+
+        Callers remain responsible for validating the resulting size and for
+        choosing a private destination.  The backup path does both.
+        """
+
+        self.run("pull", remote_path, str(local_path), timeout=timeout)
+        if not local_path.is_file():
+            raise ProtocolError(
+                f"ADB pull reported success but created no file for {remote_path}"
+            )
 
     def wait_for_device(self, *, timeout: float) -> None:
         """Poll across the normal-HID-to-ADB USB transport transition.
@@ -198,23 +229,35 @@ class AdbClient:
 
     def identity_and_partitions(self) -> tuple[str, list[MtdPartition]]:
         self.ensure_available()
-        identity = self.exec_out("id").decode("utf-8", "replace").strip()
+        # These outputs are text, so the stock daemon's legacy shell service is
+        # appropriate. parse_proc_mtd removes the doubled CR characters seen on
+        # Windows before interpreting any sizes or names.
+        identity = self.shell("id").decode("utf-8", "replace").strip()
         if "uid=0" not in identity:
             raise ProtocolError("ADB shell is not root; refusing raw MTD access")
-        text = self.exec_out("cat", "/proc/mtd").decode("ascii", "strict")
+        text = self.shell("cat", "/proc/mtd").decode("ascii", "strict")
         parts = parse_proc_mtd(text)
         validate_partition_map(parts)
         return identity, parts
 
     def read_flash_once(self, parts: list[MtdPartition]) -> bytes:
         image = bytearray()
-        for part in parts:
-            data = self.exec_out("cat", part.device, timeout=120)
-            if len(data) != part.size:
-                raise ProtocolError(
-                    f"short read from {part.device}: got {len(data)}, expected {part.size}"
-                )
-            image.extend(data)
+        # Never route flash bytes through ``adb shell``: older Windows shell
+        # transports can alter line endings. Each partition instead goes to a
+        # fresh private host file via the ADB sync protocol, is size-checked,
+        # appended in validated MTD order, and is removed with the directory.
+        with tempfile.TemporaryDirectory(prefix="cc2flash-adb-pull-") as directory:
+            temporary_directory = Path(directory)
+            for part in parts:
+                local_path = temporary_directory / f"mtd{part.index}.bin"
+                self.pull(part.device, local_path, timeout=120)
+                data = local_path.read_bytes()
+                if len(data) != part.size:
+                    raise ProtocolError(
+                        f"short read from {part.device}: got {len(data)}, "
+                        f"expected {part.size}"
+                    )
+                image.extend(data)
         if len(image) != FLASH_SIZE:
             raise ProtocolError("assembled flash image is not exactly 8 MiB")
         return bytes(image)

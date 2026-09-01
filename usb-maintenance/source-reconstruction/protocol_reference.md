@@ -1,6 +1,6 @@
 # Elegoo Centauri Carbon 2 stock-camera interaction protocol
 
-**Firmware-specific reverse-engineering reference — 2026-08-31**
+**Firmware-specific reverse-engineering reference — 2026-09-01**
 
 This document describes every command branch found in the supplied CC2 camera's
 Linux maintenance daemon and U-Boot updater. It covers normal-mode USB HID,
@@ -11,7 +11,7 @@ the absence of any USB flash-read command.
 The catalog is complete for the two analyzed binaries. It is not a claim about
 other firmware revisions. All multibyte integers are little-endian unless noted.
 
-> **Destructive restore remains hardware-unverified.** Client v0.3.0 decodes
+> **Destructive restore remains hardware-unverified.** Client v0.4.0 decodes
 > bootloader ACKs as the next expected packet number and rejects unexpected or
 > retry requests; it does not yet retransmit. The guarded persistent ADB startup
 > write is implemented for backup. Both behaviors are detailed below.
@@ -630,6 +630,20 @@ timeout, multiple or unauthorized devices, a non-root shell, malformed
 partition map, failed/short read, or two-pass mismatch does not enter either HID
 startup path.
 
+The stock daemon implements legacy ADB `shell` and sync/`pull`, but rejects the
+newer `exec-out` service with `error: closed`. The client therefore uses `shell`
+only for textual `id` and `/proc/mtd` results, removing the doubled carriage
+returns observed on Windows before parsing. It pulls each `/dev/mtdN` through
+ADB sync into a fresh private host file, requires the exact validated partition
+size, concatenates in MTD order, and deletes the temporary directory. It repeats
+that complete process independently and accepts the backup only when both 8 MiB
+images are byte-identical. It never sends binary flash data through the
+terminal-oriented shell service.
+
+This choice is runtime-grounded: on Windows 11 with ADB 35.0.2, a live
+`adb pull /dev/mtd4` returned exactly 65,536 bytes. Its local MD5
+`56392b3d32797a089432c7b633ef921f` matched `md5sum /dev/mtd4` on the camera.
+
 ### 9.1 Temporary upload-command start
 
 `--start-adb-through-upload-command` uses two confirmed bugs without weakening
@@ -718,7 +732,7 @@ required before any mutation.
 |---|---|---|---|
 | Bootloader data ACK | parses `u32le(next_expected_packet)` and requires the next in-order value; aborts on retry request | payload is the next expected packet, including a batch restart after an error | Wire-aligned for in-order packets; retransmission and hardware validation remain |
 | Backup startup | installs `/etc/conf.d/system.sh` through guarded normal HID when ADB is absent | `rcS` executes the persistent hook next boot | Implemented and offline-tested; manual hook behavior runtime-verified |
-| Temporary ADB start | explicit flag sends an immutable no-space upload target, tolerates only final-commit failure/disconnect, polls across the old transport closing, then reads twice | unquoted `rm` target starts `/bin/adbd`; literal `fopen` then fails | Physical startup and `adb shell` verified on Windows; automatic two-pass continuation awaits retest |
+| Temporary ADB start | explicit flag sends an immutable no-space upload target, tolerates only final-commit failure/disconnect, polls across the old transport closing, then reads twice via ADB sync/pull | unquoted `rm` target starts `/bin/adbd`; literal `fopen` then fails | Physical startup, root shell, and one byte-exact MTD pull verified on Windows; complete automatic two-pass continuation awaits retest |
 | Public Python catalog | exposes all 57 exact normal commands, every `0x4xxx` match, and boot types 1/2/3/5 with builders/decoders | complete analyzed dispatcher/state-machine surface | Implemented with source comments and exhaustive offline mapping tests |
 
 The protocol builder, MD5 header, packet numbering, range checks, and
@@ -763,7 +777,7 @@ The following remain hardware-unverified or unknown:
 - normal and bootloader endpoint numbers assigned at runtime;
 - the bootloader CDC PID and exact serial endpoint configuration;
 - host HID API differences involving report-ID prefixes;
-- physical validation of the client-generated ADB-startup upload sequence;
+- physical validation of a complete six-partition, two-pass ADB acquisition;
 - physical timeout/retry timing and reboot duration;
 - erase/write behavior and failure reporting on the installed NOR chip;
 - whether other CC2 camera firmware revisions use the same commands; and

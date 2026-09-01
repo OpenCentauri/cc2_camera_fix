@@ -13,15 +13,20 @@
   state poll. Live Windows testing showed that a successful startup closes the
   old USB transport first, causing `wait-for-device` to exit with
   `error: closed` even though the new daemon then accepts `adb shell`.
+- Uses the stock daemon's legacy `shell` service for text and its binary-safe
+  sync/`pull` service for MTD acquisition. Live Windows testing established that
+  `exec-out` is unsupported, while a 65,536-byte `/dev/mtd4` pull exactly
+  matched the camera-side MD5.
 - Kept the ordinary upload target builder's shell-metacharacter rejection and
   added one immutable, audit-oriented builder for the exact no-space target
   `/tmp/.cc2flash-adbd-bootstrap;/bin/adbd&`.
 - Treats only the final `0x3300` failure, timeout, or HID disconnect as expected;
   initialize, target, and final-data failures still abort before injection.
 - Preserved `--bootstrap-adb` as a mutually exclusive persistent alternative.
-- Expanded the offline suite from 41 to 50 tests, including ADB-offline
+- Expanded the offline suite from 41 to 54 tests, including ADB-offline
   classification, the exact injected
-  frame, expected commit rejection, HID re-enumeration, and same-run backup.
+  frame, expected commit rejection, HID re-enumeration, legacy text-shell
+  parsing, ordered binary pulls, and same-run backup.
 
 ## v0.5.0 — complete public Python command library
 

@@ -226,6 +226,85 @@ class BackupTests(unittest.TestCase):
             with self.assertRaisesRegex(AdbUnavailable, "not online"):
                 AdbClient().ensure_available()
 
+    def test_identity_and_partition_map_use_legacy_text_shell(self):
+        responses = [
+            SimpleNamespace(returncode=0, stdout=b"device\n", stderr=b""),
+            SimpleNamespace(
+                returncode=0,
+                stdout=b"uid=0(root) gid=0(root)\r\r\n",
+                stderr=b"",
+            ),
+            SimpleNamespace(
+                returncode=0,
+                stdout=PROC_MTD.replace("\n", "\r\r\n").encode("ascii"),
+                stderr=b"",
+            ),
+        ]
+        client = AdbClient(serial="Ucamera001")
+        with mock.patch(
+            "cc2flash.adb_backup.subprocess.run", side_effect=responses
+        ) as run:
+            identity, parts = client.identity_and_partitions()
+        self.assertEqual(identity, "uid=0(root) gid=0(root)")
+        self.assertEqual(len(parts), 6)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(
+            commands,
+            [
+                ["adb", "-s", "Ucamera001", "get-state"],
+                ["adb", "-s", "Ucamera001", "shell", "id"],
+                ["adb", "-s", "Ucamera001", "shell", "cat", "/proc/mtd"],
+            ],
+        )
+
+    def test_flash_read_pulls_every_partition_in_binary_safe_order(self):
+        parts = parse_proc_mtd(PROC_MTD)
+        client = AdbClient()
+
+        def fake_pull(remote_path, local_path, *, timeout):
+            index = int(remote_path.removeprefix("/dev/mtd"))
+            Path(local_path).write_bytes(bytes((index,)) * parts[index].size)
+
+        with mock.patch.object(client, "pull", side_effect=fake_pull) as pull:
+            image = client.read_flash_once(parts)
+        self.assertEqual(len(image), FLASH_SIZE)
+        self.assertEqual(pull.call_count, 6)
+        offset = 0
+        for index, part in enumerate(parts):
+            self.assertEqual(image[offset], index)
+            self.assertEqual(image[offset + part.size - 1], index)
+            offset += part.size
+
+    def test_flash_pull_rejects_short_partition_and_cleans_temporary_file(self):
+        part = parse_proc_mtd(PROC_MTD)[0]
+        temporary_paths = []
+        client = AdbClient()
+
+        def fake_short_pull(_remote_path, local_path, *, timeout):
+            temporary_paths.append(Path(local_path))
+            Path(local_path).write_bytes(b"x" * (part.size - 1))
+
+        with (
+            mock.patch.object(client, "pull", side_effect=fake_short_pull),
+            self.assertRaisesRegex(ProtocolError, "short read from /dev/mtd0"),
+        ):
+            client.read_flash_once([part])
+        self.assertEqual(len(temporary_paths), 1)
+        self.assertFalse(temporary_paths[0].exists())
+
+    def test_pull_requires_adb_to_create_the_requested_local_file(self):
+        client = AdbClient(serial="Ucamera001")
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "mtd4.bin"
+            with (
+                mock.patch.object(client, "run", return_value=b"") as run,
+                self.assertRaisesRegex(ProtocolError, "created no file"),
+            ):
+                client.pull("/dev/mtd4", destination, timeout=7)
+        run.assert_called_once_with(
+            "pull", "/dev/mtd4", str(destination), timeout=7
+        )
+
     def test_wait_for_device_retries_closed_and_offline_until_online(self):
         client = AdbClient()
         states = [

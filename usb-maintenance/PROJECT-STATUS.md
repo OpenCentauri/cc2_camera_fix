@@ -1,6 +1,6 @@
 # Project status
 
-**Documentation checkpoint: 2026-08-31**
+**Documentation checkpoint: 2026-09-01**
 
 ## Completed
 
@@ -20,6 +20,9 @@
 - Added an explicit nonpersistent alternative that starts `/bin/adbd` through
   the uploader's unquoted `rm` target, waits for ADB, and continues the two-pass
   backup in the same invocation.
+- Replaced backup use of unsupported `adb exec-out` with legacy text `shell`
+  plus binary-safe sync/`pull`. A live Windows pull of `/dev/mtd4` returned the
+  exact expected 65,536 bytes and matched the camera-side MD5.
 - Corrected the bootloader ACK interpretation: type-2 payload is
   `u32le(next_expected_packet)`.
 - Reconstructed the complete update-relevant Linux daemon, SPL gate, and main
@@ -36,7 +39,7 @@
 
 ## Client status
 
-The included Python client is now v0.4.0 with 50 passing offline tests. Its
+The included Python client is now v0.4.0 with 54 passing offline tests. Its
 two-pass backup path is implemented, including both the temporary upload-command
 ADB start and the guarded persistent ADB-startup fallback.
 The restore path now parses type-2 payloads as the next expected absolute packet
@@ -74,6 +77,9 @@ malformed-device states remain refusals.
   `hid_update` control flow. Its first physical-camera test successfully started
   `/bin/adbd` and allowed `adb shell`; the Windows host exposed a now-corrected
   retry bug by returning `error: closed` from the old USB transport first.
+- The same live session confirmed that stock `adbd` rejects `exec-out`, but its
+  sync service pulls `/dev/mtd4` without byte changes. The complete six-partition,
+  two-pass client acquisition still awaits a physical rerun.
 
 The authoritative protocol and full command catalog are in `PROTOCOL.md`; static
 anchors and hashes are in `EVIDENCE.md`. The human-readable reconstruction and

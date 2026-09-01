@@ -12,7 +12,9 @@ the stock Elegoo Centauri Carbon 2 camera firmware found in the supplied
 
 The important result is that the bootloader USB updater is **write-only**. It
 does not implement a flash-read request. The included backup implementation
-instead reads `/dev/mtd0` through `/dev/mtd5` twice over root ADB. If ADB is
+instead reads `/dev/mtd0` through `/dev/mtd5` twice over root ADB. It uses the
+legacy shell service for text checks and binary-safe `adb pull` for MTD bytes;
+the stock daemon does not support modern `adb exec-out`. If ADB is
 absent, `backup --start-adb-through-upload-command` can start `/bin/adbd` for the
 current boot through the normal-HID uploader's unquoted shell command and then
 continue the read without restarting. The older `--bootstrap-adb` alternative
@@ -20,9 +22,10 @@ overwrites `/etc/conf.d/system.sh` with `/bin/adbd &`; the root startup script
 executes that persistent hook on the next boot.
 
 This code was recovered by static analysis and tested offline against the
-provided dump. The startup hook itself was runtime-validated manually by the
-device owner; this client-generated HID sequence has not yet been captured on
-physical hardware. Capture a two-pass backup before considering restore.
+provided dump. Live Windows testing has now validated temporary HID startup,
+root `adb shell`, and a byte-exact 65,536-byte pull from `/dev/mtd4`; the full
+automatic two-pass acquisition still awaits rerun. Capture a two-pass backup
+before considering restore.
 
 ## Human-readable source reconstruction
 
@@ -258,12 +261,14 @@ image is then the intended recovery path.
 
 ## Current limits
 
-- No physical-camera test transcript is included yet.
+- Temporary ADB startup and one binary-safe partition pull have been exercised
+  on a physical camera; a complete automatic two-pass read has not yet passed.
 - Bootloader data ACK parsing now matches the disassembly for in-order packets,
   but automatic retransmission and physical-camera validation remain absent.
 - The default/persistent ADB recovery overwrites a startup hook before the first
   backup; the explicit upload-command route avoids that file but deliberately
-  relies on a vendor command-injection bug and remains hardware-unverified.
+  relies on a vendor command-injection bug. That temporary startup has now been
+  hardware-verified, but the vendor handler's `sync` caveat remains.
 - CDC transport is identified but not implemented; HID is the bootloader's
   default and the path used here.
 - Range writes are intentionally omitted.  Although the header accepts an
@@ -283,10 +288,11 @@ See [PROTOCOL.md](PROTOCOL.md) for the recovered wire formats and
 python -m unittest discover -s tests -v
 ```
 
-The 50 tests exercise the 57-entry normal command catalog, all configuration and
+The 54 tests exercise the 57-entry normal command catalog, all configuration and
 upload mappings, command builders, U-Boot frame types/ACK decoders, frame
 vectors, checksums, image headers, packet numbering, partition validation, ADB
 absence/offline/error classification, backup-manifest enforcement, both ADB startup mechanisms,
 expected final-commit failure/disconnection, the Windows `error: closed`
-transport handoff, CLI mutation guards, and the HID
+transport handoff, legacy text-shell parsing, ordered binary MTD pulls and
+temporary-file cleanup, CLI mutation guards, and the HID
 state machines without opening a device.
