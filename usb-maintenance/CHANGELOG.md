@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.7.0 — read-only backup and stable boot fingerprint
+
+- Bumped the Python client to v0.5.0.
+- Made `backup` strictly read-only. An offline camera now receives instructions
+  for the separate `start-adb` or `install-adb-startup` commands; it is never
+  mutated as an automatic fallback.
+- Replaced the two-read rule with three consecutive byte-identical 8 MiB reads
+  within at most five attempts, matching the repository's hardware-recovery
+  minimum while allowing live JFFS2 state two additional chances to settle.
+- Added a known SHA-256 gate for the complete 256 KiB boot partition:
+  `5602ec961b4410ccceea0d4910e4fa768c6998bd4ba86143ba50855bdd0b7a54`.
+- Unknown boot partitions fail only after the three-read gate, print the exact
+  observed hash, and require an exact reviewed
+  `--accept-bootloader-hash <sha256>` override before any backup is published.
+- Added the `cc2flash-backup-v2` manifest with read-policy, boot-fingerprint,
+  and acceptance-basis fields; restore rejects legacy two-read manifests.
+- Expanded the offline suite from 54 to 63 tests, including stability ordering,
+  hash output/override behavior, read-only backup, and separate ADB commands.
+
 ## v0.6.0 — temporary ADB startup through upload command
 
 - Bumped the Python client to v0.4.0.

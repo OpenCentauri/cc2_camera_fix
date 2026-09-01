@@ -15,11 +15,15 @@
 - Corrected the earlier ADB assumption: `adbd` exists but is not autostarted.
 - Confirmed that root `rcS` mounts JFFS2 at `/etc/conf.d` and executes an
   optional `/etc/conf.d/system.sh` before mounting `/system`.
-- Integrated a guarded normal-HID fallback that installs the runtime-validated
-  `/bin/adbd &` startup hook, stops, and requires a manual restart.
-- Added an explicit nonpersistent alternative that starts `/bin/adbd` through
-  the uploader's unquoted `rm` target, waits for ADB, and continues the two-pass
-  backup in the same invocation.
+- Added a guarded `install-adb-startup` command that installs the
+  runtime-validated `/bin/adbd &` startup hook, stops, and requires a manual
+  restart.
+- Added a separate nonpersistent `start-adb` command that starts `/bin/adbd`
+  through the uploader's unquoted `rm` target, waits for root ADB, and exits
+  without reading flash or installing a persistent file.
+- Made `backup` strictly read-only. It requires three consecutive identical
+  full reads within five attempts before evaluating a known boot-partition
+  SHA-256 or an exact user-reviewed override.
 - Replaced backup use of unsupported `adb exec-out` with legacy text `shell`
   plus binary-safe sync/`pull`. A live Windows pull of `/dev/mtd4` returned the
   exact expected 65,536 bytes and matched the camera-side MD5.
@@ -39,9 +43,10 @@
 
 ## Client status
 
-The included Python client is now v0.4.0 with 54 passing offline tests. Its
-two-pass backup path is implemented, including both the temporary upload-command
-ADB start and the guarded persistent ADB-startup fallback.
+The included Python client is now v0.5.0 with 63 passing offline tests. Its
+backup path is strictly read-only and requires three consecutive identical full
+reads within five attempts. Temporary and persistent ADB setup are separate
+commands rather than fallback flags on `backup`.
 The restore path now parses type-2 payloads as the next expected absolute packet
 and its two-packet mock proves the `ACK 0 → packet 0 → ACK 1 → final packet →
 type-5` sequence. It rejects a retransmission request with an explicit error;
@@ -50,7 +55,7 @@ hardware-unverified rather than known wire-incompatible.
 
 The expanded tests verify exact catalog completeness, all 21 configuration
 pairs, all 13 uploader commands, all four U-Boot frame types, group-wide
-`0x4xxx` behavior, builders/decoders, the exact
+`0x4xxx` behavior, builders/decoders, stable-read/hash gates, the exact
 `3000 → 3110 → 3200(final) → 3300` ADB-startup upload, interactive guards, and
 the temporary command-injection transaction and the prior backup/image safety
 checks.
@@ -78,8 +83,13 @@ malformed-device states remain refusals.
   `/bin/adbd` and allowed `adb shell`; the Windows host exposed a now-corrected
   retry bug by returning `error: closed` from the old USB transport first.
 - The same live session confirmed that stock `adbd` rejects `exec-out`, but its
-  sync service pulls `/dev/mtd4` without byte changes. The complete six-partition,
-  two-pass client acquisition still awaits a physical rerun.
+  sync service pulls raw MTD devices without byte changes. A later invocation
+  acquired a complete 8 MiB image with SHA-256
+  `bccc6818a998d1c143c94543194e2d314cdee7a5f43b62db1fc6bb0b038c22a7`.
+  Its boot partition is byte-identical to the supplied reference image and has
+  SHA-256
+  `5602ec961b4410ccceea0d4910e4fa768c6998bd4ba86143ba50855bdd0b7a54`.
+  The strengthened three-consecutive-read policy is not yet physically rerun.
 
 The authoritative protocol and full command catalog are in `PROTOCOL.md`; static
 anchors and hashes are in `EVIDENCE.md`. The human-readable reconstruction and

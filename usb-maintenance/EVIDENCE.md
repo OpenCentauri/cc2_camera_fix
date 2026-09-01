@@ -134,9 +134,26 @@ The same session compared the daemon's read services:
 The pulled `mtd4` SHA-256 was
 `ff1d60111d2517e1423a0b9c72b7b3c62e9388e54217929cbd33e2d16909958c`.
 This establishes ADB sync/`pull` as a byte-preserving Windows transport for a
-raw MTD character device on this firmware. It does not yet establish a complete
-six-partition, two-pass acquisition; the client retains exact per-partition
-sizes and whole-image equality as mandatory gates for that test.
+raw MTD character device on this firmware. A subsequent client invocation
+successfully acquired and published a complete 8 MiB image:
+
+| Property | Value |
+|---|---|
+| Full-image SHA-256 | `bccc6818a998d1c143c94543194e2d314cdee7a5f43b62db1fc6bb0b038c22a7` |
+| Full-image MD5 | `245763ac1fd9a6afdc79450886266a09` |
+| 256 KiB boot SHA-256 | `5602ec961b4410ccceea0d4910e4fa768c6998bd4ba86143ba50855bdd0b7a54` |
+
+Comparison with the supplied reference image showed byte identity for boot,
+kernel, root, system, and HWCONFIG; differences were confined to the live JFFS2
+config partition. The boot SHA-256 above is therefore the client's built-in
+known reference. The first same-boot acquisition attempt failed the then-current
+two-read equality gate, while the next invocation succeeded. This motivated the
+stronger policy of requiring three consecutive identical images while allowing
+at most five attempts for live state to settle.
+
+The stable-read gate precedes the boot-hash gate. An unknown boot hash is not
+reported or accepted from a lone read: it is exposed only after three
+consecutive full images agree, and it must then be accepted by exact value.
 
 ## Corrected bootloader ACK interpretation
 

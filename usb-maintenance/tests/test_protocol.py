@@ -16,7 +16,12 @@ from cc2flash.adb_backup import (
     AdbClient,
     AdbUnavailable,
     EXPECTED_PARTITIONS,
-    acquire_twice,
+    KNOWN_BOOTLOADER_SHA256,
+    MAX_READ_ATTEMPTS,
+    REQUIRED_IDENTICAL_READS,
+    acquire_stable,
+    bootloader_reference,
+    hashes,
     parse_proc_mtd,
     save_backup,
     validate_partition_map,
@@ -163,34 +168,11 @@ class BackupTests(unittest.TestCase):
         with self.assertRaisesRegex(ProtocolError, "partition sizes"):
             validate_partition_map(parts)
 
-    def test_two_pass_backup_and_manifest(self):
+    def test_three_consecutive_reads_build_v2_manifest(self):
         parts = parse_proc_mtd(PROC_MTD)
         image = b"".join(
             bytes((index,)) * size for index, (_name, size) in enumerate(EXPECTED_PARTITIONS)
         )
-
-        class FakeAdb:
-            serial = "fake"
-
-            def identity_and_partitions(self):
-                return "uid=0(root)", parts
-
-            def read_flash_once(self, _parts):
-                return image
-
-        acquired, manifest = acquire_twice(FakeAdb())
-        self.assertEqual(acquired, image)
-        self.assertEqual(manifest["read_passes"], 2)
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "backup.bin"
-            manifest_path = save_backup(path, acquired, manifest)
-            self.assertTrue(manifest_path.is_file())
-            self.assertEqual(validate_preserved_backup(path)["sha256"], manifest["sha256"])
-            with self.assertRaisesRegex(ProtocolError, "overwrite"):
-                save_backup(path, acquired, manifest)
-
-    def test_two_pass_mismatch_is_rejected(self):
-        parts = parse_proc_mtd(PROC_MTD)
 
         class FakeAdb:
             serial = "fake"
@@ -201,10 +183,108 @@ class BackupTests(unittest.TestCase):
 
             def read_flash_once(self, _parts):
                 self.calls += 1
-                return bytes((self.calls,)) * FLASH_SIZE
+                return image
 
-        with self.assertRaisesRegex(ProtocolError, "differ"):
-            acquire_twice(FakeAdb())
+        fake_adb = FakeAdb()
+        progress = mock.Mock()
+        acquired, manifest = acquire_stable(fake_adb, progress=progress)
+        self.assertEqual(acquired, image)
+        self.assertEqual(fake_adb.calls, 3)
+        self.assertEqual(manifest["format"], "cc2flash-backup-v2")
+        self.assertEqual(manifest["read_passes"], 3)
+        self.assertEqual(manifest["required_identical_reads"], 3)
+        self.assertEqual(manifest["consecutive_identical_reads"], 3)
+        self.assertEqual(manifest["maximum_read_attempts"], 5)
+        self.assertEqual(progress.call_count, 3)
+        manifest["bootloader"]["acceptance"] = "explicit-hash"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "backup.bin"
+            manifest_path = save_backup(path, acquired, manifest)
+            self.assertTrue(manifest_path.is_file())
+            self.assertEqual(validate_preserved_backup(path)["sha256"], manifest["sha256"])
+            with self.assertRaisesRegex(ProtocolError, "overwrite"):
+                save_backup(path, acquired, manifest)
+
+    def test_reads_settle_after_initial_mismatch(self):
+        parts = parse_proc_mtd(PROC_MTD)
+        values = [1, 2, 2, 2]
+
+        class FakeAdb:
+            serial = "fake"
+            calls = 0
+
+            def identity_and_partitions(self):
+                return "uid=0(root)", parts
+
+            def read_flash_once(self, _parts):
+                value = values[self.calls]
+                self.calls += 1
+                return bytes((value,)) * FLASH_SIZE
+
+        fake_adb = FakeAdb()
+        progress = mock.Mock()
+        acquired, manifest = acquire_stable(fake_adb, progress=progress)
+        self.assertEqual(acquired[:1], b"\x02")
+        self.assertEqual(manifest["read_passes"], 4)
+        self.assertEqual(
+            [call.args[2] for call in progress.call_args_list],
+            [1, 1, 2, 3],
+        )
+
+    def test_five_unstable_reads_are_rejected_before_boot_hash_check(self):
+        parts = parse_proc_mtd(PROC_MTD)
+        values = [1, 1, 2, 2, 1]
+
+        class FakeAdb:
+            serial = "fake"
+            calls = 0
+
+            def identity_and_partitions(self):
+                return "uid=0(root)", parts
+
+            def read_flash_once(self, _parts):
+                value = values[self.calls]
+                self.calls += 1
+                return bytes((value,)) * FLASH_SIZE
+
+        fake_adb = FakeAdb()
+        with (
+            mock.patch("cc2flash.adb_backup.bootloader_reference") as reference,
+            self.assertRaisesRegex(
+                ProtocolError, "five complete.*three consecutive"
+            ),
+        ):
+            acquire_stable(fake_adb)
+        self.assertEqual(fake_adb.calls, MAX_READ_ATTEMPTS)
+        reference.assert_not_called()
+
+    def test_bootloader_reference_records_observed_and_known_hashes(self):
+        image = b"\0" * FLASH_SIZE
+        result = bootloader_reference(image)
+        expected_observed = hashlib.sha256(image[:0x40000]).hexdigest()
+        self.assertEqual(result["partition"], "boot")
+        self.assertEqual(result["size"], 0x40000)
+        self.assertEqual(result["sha256"], expected_observed)
+        self.assertEqual(result["known_sha256"], KNOWN_BOOTLOADER_SHA256)
+        self.assertEqual(
+            result["known_reference"],
+            expected_observed == KNOWN_BOOTLOADER_SHA256,
+        )
+
+    def test_restore_rejects_legacy_two_read_manifest(self):
+        image = b"\0" * FLASH_SIZE
+        manifest = {
+            "format": "cc2flash-backup-v1",
+            **hashes(image),
+            "read_passes": 2,
+            "partitions": [],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "backup.bin"
+            path.write_bytes(image)
+            path.with_name(path.name + ".json").write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ProtocolError, "v2 manifest"):
+                validate_preserved_backup(path)
 
     def test_adb_absence_is_distinguished_for_bootstrap(self):
         result = SimpleNamespace(
@@ -559,139 +639,226 @@ class HidStateMachineTests(unittest.TestCase):
         self.assertFalse(replies)
 
 
-class CliBootstrapTests(unittest.TestCase):
-    def test_interactive_confirmation_installs_startup_hook(self):
-        interactive_stdin = SimpleNamespace(isatty=lambda: True)
+class CliAdbWorkflowTests(unittest.TestCase):
+    @staticmethod
+    def _manifest(boot_hash=KNOWN_BOOTLOADER_SHA256, *, known=True):
+        return {
+            "size": 5,
+            "sha256": hashlib.sha256(b"image").hexdigest(),
+            "md5": hashlib.md5(b"image").hexdigest(),
+            "read_passes": 3,
+            "bootloader": {
+                "sha256": boot_hash,
+                "known_reference": known,
+            },
+        }
+
+    def test_backup_offline_is_strictly_read_only_and_instructs(self):
+        stderr = io.StringIO()
         with (
             mock.patch.object(
-                cli, "acquire_twice", side_effect=AdbUnavailable("device offline")
+                cli, "acquire_stable", side_effect=AdbUnavailable("device offline")
             ),
+            mock.patch.object(cli, "start_adb_through_upload_command") as start,
+            mock.patch.object(cli, "install_adb_startup") as install,
+            mock.patch.object(cli, "save_backup") as save,
+            redirect_stdout(io.StringIO()),
+            redirect_stderr(stderr),
+        ):
+            status = cli.main(["backup", "backup.bin"])
+        self.assertEqual(status, 2)
+        start.assert_not_called()
+        install.assert_not_called()
+        save.assert_not_called()
+        error = stderr.getvalue()
+        self.assertIn("strictly read-only", error)
+        self.assertIn("cc2flash start-adb", error)
+        self.assertIn("cc2flash install-adb-startup", error)
+
+    def test_start_adb_is_separate_and_validates_root(self):
+        fake_adb = mock.Mock()
+        fake_adb.ensure_available.side_effect = AdbUnavailable("device offline")
+        fake_adb.identity_and_partitions.return_value = ("uid=0(root)", mock.sentinel.parts)
+        with (
+            mock.patch.object(cli, "_adb", return_value=fake_adb),
+            mock.patch.object(cli, "start_adb_through_upload_command") as start,
+            redirect_stdout(io.StringIO()),
+            redirect_stderr(io.StringIO()),
+        ):
+            status = cli.main(["start-adb", "--timeout", "7"])
+        self.assertEqual(status, 0)
+        start.assert_called_once_with()
+        fake_adb.wait_for_device.assert_called_once_with(timeout=7.0)
+        fake_adb.identity_and_partitions.assert_called_once_with()
+
+    def test_start_adb_online_does_not_send_hid(self):
+        fake_adb = mock.Mock()
+        fake_adb.identity_and_partitions.return_value = ("uid=0(root)", mock.sentinel.parts)
+        with (
+            mock.patch.object(cli, "_adb", return_value=fake_adb),
+            mock.patch.object(cli, "start_adb_through_upload_command") as start,
+            redirect_stdout(io.StringIO()),
+        ):
+            status = cli.main(["start-adb"])
+        self.assertEqual(status, 0)
+        start.assert_not_called()
+
+    def test_start_adb_does_not_mask_other_adb_errors(self):
+        fake_adb = mock.Mock()
+        fake_adb.ensure_available.side_effect = ProtocolError("unauthorized")
+        with (
+            mock.patch.object(cli, "_adb", return_value=fake_adb),
+            mock.patch.object(cli, "start_adb_through_upload_command") as start,
+            redirect_stdout(io.StringIO()),
+            redirect_stderr(io.StringIO()),
+        ):
+            status = cli.main(["start-adb"])
+        self.assertEqual(status, 2)
+        start.assert_not_called()
+
+    def test_interactive_install_adb_startup_requires_exact_phrase(self):
+        fake_adb = mock.Mock()
+        fake_adb.ensure_available.side_effect = AdbUnavailable("device offline")
+        interactive_stdin = SimpleNamespace(isatty=lambda: True)
+        with (
+            mock.patch.object(cli, "_adb", return_value=fake_adb),
             mock.patch.object(cli, "install_adb_startup") as install,
             mock.patch.object(sys, "stdin", interactive_stdin),
             mock.patch("builtins.input", return_value="ENABLE-ADB"),
             redirect_stdout(io.StringIO()),
             redirect_stderr(io.StringIO()),
         ):
-            status = cli.main(["backup", "backup.bin"])
+            status = cli.main(["install-adb-startup"])
         self.assertEqual(status, 3)
         install.assert_called_once_with()
 
-    def test_interactive_confirmation_mismatch_does_not_write(self):
+    def test_install_confirmation_mismatch_does_not_write(self):
+        fake_adb = mock.Mock()
+        fake_adb.ensure_available.side_effect = AdbUnavailable("device offline")
         interactive_stdin = SimpleNamespace(isatty=lambda: True)
         with (
-            mock.patch.object(
-                cli, "acquire_twice", side_effect=AdbUnavailable("device offline")
-            ),
+            mock.patch.object(cli, "_adb", return_value=fake_adb),
             mock.patch.object(cli, "install_adb_startup") as install,
             mock.patch.object(sys, "stdin", interactive_stdin),
             mock.patch("builtins.input", return_value="no"),
             redirect_stdout(io.StringIO()),
             redirect_stderr(io.StringIO()),
         ):
-            status = cli.main(["backup", "backup.bin"])
+            status = cli.main(["install-adb-startup"])
         self.assertEqual(status, 2)
         install.assert_not_called()
 
-    def test_explicit_bootstrap_installs_and_requires_restart(self):
-        stdout = io.StringIO()
-        stderr = io.StringIO()
+    def test_noninteractive_install_requires_yes(self):
+        fake_adb = mock.Mock()
+        fake_adb.ensure_available.side_effect = AdbUnavailable("device offline")
         with (
-            mock.patch.object(
-                cli, "acquire_twice", side_effect=AdbUnavailable("device offline")
-            ),
+            mock.patch.object(cli, "_adb", return_value=fake_adb),
             mock.patch.object(cli, "install_adb_startup") as install,
-            mock.patch.object(cli, "save_backup") as save,
-            redirect_stdout(stdout),
-            redirect_stderr(stderr),
+            mock.patch.object(sys, "stdin", io.StringIO()),
+            redirect_stdout(io.StringIO()),
+            redirect_stderr(io.StringIO()),
         ):
-            status = cli.main(["backup", "backup.bin", "--bootstrap-adb"])
+            status = cli.main(["install-adb-startup"])
+        self.assertEqual(status, 2)
+        install.assert_not_called()
+
+    def test_explicit_install_requires_restart(self):
+        fake_adb = mock.Mock()
+        fake_adb.ensure_available.side_effect = AdbUnavailable("device offline")
+        stdout = io.StringIO()
+        with (
+            mock.patch.object(cli, "_adb", return_value=fake_adb),
+            mock.patch.object(cli, "install_adb_startup") as install,
+            redirect_stdout(stdout),
+            redirect_stderr(io.StringIO()),
+        ):
+            status = cli.main(["install-adb-startup", "--yes"])
         self.assertEqual(status, 3)
         install.assert_called_once_with()
-        save.assert_not_called()
-        self.assertIn("No flash was read", stdout.getvalue())
         self.assertIn("restart", stdout.getvalue().casefold())
-        self.assertIn("overwrite /etc/conf.d/system.sh", stderr.getvalue())
 
-    def test_temporary_upload_command_starts_adb_and_continues_backup(self):
-        image = b"image"
-        manifest = {
-            "size": len(image),
-            "sha256": hashlib.sha256(image).hexdigest(),
-            "md5": hashlib.md5(image).hexdigest(),
-        }
+    def test_install_when_adb_online_does_not_write(self):
         fake_adb = mock.Mock()
         with (
             mock.patch.object(cli, "_adb", return_value=fake_adb),
-            mock.patch.object(
-                cli,
-                "acquire_twice",
-                side_effect=[AdbUnavailable("device offline"), (image, manifest)],
-            ),
-            mock.patch.object(cli, "start_adb_through_upload_command") as start,
-            mock.patch.object(cli, "install_adb_startup") as persistent,
-            mock.patch.object(cli, "save_backup", return_value=Path("backup.bin.json")) as save,
+            mock.patch.object(cli, "install_adb_startup") as install,
             redirect_stdout(io.StringIO()),
-            redirect_stderr(io.StringIO()),
         ):
-            status = cli.main(
-                [
-                    "backup",
-                    "backup.bin",
-                    "--start-adb-through-upload-command",
-                    "--adb-startup-timeout",
-                    "7",
-                ]
-            )
+            status = cli.main(["install-adb-startup", "--yes"])
         self.assertEqual(status, 0)
-        start.assert_called_once_with()
-        persistent.assert_not_called()
-        fake_adb.wait_for_device.assert_called_once_with(timeout=7.0)
+        install.assert_not_called()
+
+    def test_known_bootloader_is_accepted_after_stable_acquisition(self):
+        image = b"image"
+        manifest = self._manifest()
+        with (
+            mock.patch.object(cli, "acquire_stable", return_value=(image, manifest)) as acquire,
+            mock.patch.object(
+                cli, "save_backup", return_value=Path("backup.bin.json")
+            ) as save,
+            redirect_stdout(io.StringIO()),
+        ):
+            status = cli.main(["backup", "backup.bin"])
+        self.assertEqual(status, 0)
+        acquire.assert_called_once()
+        self.assertEqual(manifest["bootloader"]["acceptance"], "known-reference")
         save.assert_called_once_with(Path("backup.bin"), image, manifest)
 
-    def test_temporary_upload_command_does_not_mask_other_adb_errors(self):
-        with (
-            mock.patch.object(
-                cli, "acquire_twice", side_effect=ProtocolError("ADB shell is not root")
-            ),
-            mock.patch.object(cli, "start_adb_through_upload_command") as start,
-            redirect_stdout(io.StringIO()),
-            redirect_stderr(io.StringIO()),
-        ):
-            status = cli.main(
-                ["backup", "backup.bin", "--start-adb-through-upload-command"]
-            )
-        self.assertEqual(status, 2)
-        start.assert_not_called()
-
-    def test_noninteractive_bootstrap_requires_explicit_option(self):
-        stdout = io.StringIO()
+    def test_unknown_bootloader_failure_prints_exact_hash_after_reads(self):
+        image = b"image"
+        observed = "12" * 32
+        manifest = self._manifest(observed, known=False)
         stderr = io.StringIO()
         with (
-            mock.patch.object(
-                cli, "acquire_twice", side_effect=AdbUnavailable("device offline")
-            ),
-            mock.patch.object(cli, "install_adb_startup") as install,
-            mock.patch.object(sys, "stdin", io.StringIO()),
-            redirect_stdout(stdout),
+            mock.patch.object(cli, "acquire_stable", return_value=(image, manifest)) as acquire,
+            mock.patch.object(cli, "save_backup") as save,
+            redirect_stdout(io.StringIO()),
             redirect_stderr(stderr),
         ):
             status = cli.main(["backup", "backup.bin"])
         self.assertEqual(status, 2)
-        install.assert_not_called()
-        self.assertIn("--bootstrap-adb", stderr.getvalue())
+        acquire.assert_called_once()
+        save.assert_not_called()
+        error = stderr.getvalue()
+        self.assertIn(observed, error)
+        self.assertIn(f"--accept-bootloader-hash {observed}", error)
 
-    def test_other_adb_errors_never_install_startup_hook(self):
+    def test_exact_unknown_bootloader_hash_can_be_accepted(self):
+        image = b"image"
+        observed = "ab" * 32
+        manifest = self._manifest(observed, known=False)
         with (
+            mock.patch.object(cli, "acquire_stable", return_value=(image, manifest)),
             mock.patch.object(
-                cli, "acquire_twice", side_effect=ProtocolError("ADB shell is not root")
-            ),
-            mock.patch.object(cli, "install_adb_startup") as install,
+                cli, "save_backup", return_value=Path("backup.bin.json")
+            ) as save,
             redirect_stdout(io.StringIO()),
-            redirect_stderr(io.StringIO()),
         ):
-            status = cli.main(["backup", "backup.bin", "--bootstrap-adb"])
+            status = cli.main(
+                ["backup", "backup.bin", "--accept-bootloader-hash", observed]
+            )
+        self.assertEqual(status, 0)
+        self.assertEqual(manifest["bootloader"]["acceptance"], "explicit-hash")
+        save.assert_called_once_with(Path("backup.bin"), image, manifest)
+
+    def test_wrong_bootloader_override_prints_observed_and_publishes_nothing(self):
+        image = b"image"
+        observed = "ab" * 32
+        supplied = "cd" * 32
+        manifest = self._manifest(observed, known=False)
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(cli, "acquire_stable", return_value=(image, manifest)),
+            mock.patch.object(cli, "save_backup") as save,
+            redirect_stdout(io.StringIO()),
+            redirect_stderr(stderr),
+        ):
+            status = cli.main(
+                ["backup", "backup.bin", "--accept-bootloader-hash", supplied]
+            )
         self.assertEqual(status, 2)
-        install.assert_not_called()
+        save.assert_not_called()
+        self.assertIn(observed, stderr.getvalue())
 
 
 if __name__ == "__main__":

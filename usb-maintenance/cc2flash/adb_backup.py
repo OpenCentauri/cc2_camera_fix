@@ -11,6 +11,7 @@ import re
 import subprocess
 import tempfile
 import time
+from typing import Callable
 
 from .protocol import FLASH_SIZE, ProtocolError
 
@@ -32,6 +33,21 @@ EXPECTED_PARTITIONS = (
     ("system", 0x4E8000),
     ("hwconfig", 0x010000),
     ("config", 0x020000),
+)
+
+# Keep these aligned with hardware-recovery/cc2_sig_tool.py.  Three matching
+# physical reads are the repository-wide minimum for a non-reference image.
+# USB acquisition gets two extra chances because live testing showed JFFS2 may
+# still change immediately after the one-shot ADB startup command.
+REQUIRED_IDENTICAL_READS = 3
+MAX_READ_ATTEMPTS = 5
+ReadProgress = Callable[[int, int, int, int], None]
+
+# Full SHA-256 of the 256 KiB ``boot`` MTD partition. It is byte-identical in
+# the supplied reference dump and the first independently acquired live ADB
+# backup. Config is deliberately excluded because it is device/live-state data.
+KNOWN_BOOTLOADER_SHA256 = (
+    "5602ec961b4410ccceea0d4910e4fa768c6998bd4ba86143ba50855bdd0b7a54"
 )
 
 
@@ -271,25 +287,86 @@ def hashes(data: bytes) -> dict[str, str | int]:
     }
 
 
-def acquire_twice(adb: AdbClient) -> tuple[bytes, dict]:
+def bootloader_reference(image: bytes) -> dict[str, str | int | bool]:
+    """Return the observed boot-partition hash and built-in reference signal."""
+
+    boot_size = EXPECTED_PARTITIONS[0][1]
+    if len(image) != FLASH_SIZE:
+        raise ProtocolError("cannot fingerprint a non-8-MiB flash image")
+    observed = hashlib.sha256(image[:boot_size]).hexdigest()
+    return {
+        "partition": "boot",
+        "size": boot_size,
+        "sha256": observed,
+        "known_sha256": KNOWN_BOOTLOADER_SHA256,
+        "known_reference": observed == KNOWN_BOOTLOADER_SHA256,
+    }
+
+
+def acquire_stable(
+    adb: AdbClient,
+    *,
+    progress: ReadProgress | None = None,
+) -> tuple[bytes, dict]:
+    """Require three consecutive identical full reads within five attempts.
+
+    A three-of-five majority is intentionally insufficient.  Requiring the
+    same 8 MiB image three times *consecutively* demonstrates that live JFFS2
+    activity settled, rather than accepting an image that merely alternated
+    with another state.  Only the immediately preceding image is retained, so
+    retries do not accumulate five full dumps in host memory.
+    """
+
     identity, parts = adb.identity_and_partitions()
-    first = adb.read_flash_once(parts)
-    second = adb.read_flash_once(parts)
-    if first != second:
+    previous: bytes | None = None
+    accepted: bytes | None = None
+    consecutive = 0
+    attempts = 0
+
+    for attempts in range(1, MAX_READ_ATTEMPTS + 1):
+        current = adb.read_flash_once(parts)
+        if previous is not None and current == previous:
+            consecutive += 1
+        else:
+            consecutive = 1
+        if progress is not None:
+            progress(
+                attempts,
+                MAX_READ_ATTEMPTS,
+                consecutive,
+                REQUIRED_IDENTICAL_READS,
+            )
+        if consecutive >= REQUIRED_IDENTICAL_READS:
+            accepted = current
+            break
+        previous = current
+
+    if accepted is None:
         raise ProtocolError(
-            "two complete flash reads differ; no backup was accepted or written"
+            "five complete flash reads did not produce three consecutive "
+            "identical images; no backup was accepted or written"
         )
-    digest = hashes(first)
+    digest = hashes(accepted)
     manifest = {
-        "format": "cc2flash-backup-v1",
+        "format": "cc2flash-backup-v2",
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "adb_serial": adb.serial,
         "device_identity": identity,
-        "read_passes": 2,
+        "read_passes": attempts,
+        "required_identical_reads": REQUIRED_IDENTICAL_READS,
+        "consecutive_identical_reads": consecutive,
+        "maximum_read_attempts": MAX_READ_ATTEMPTS,
+        "bootloader": bootloader_reference(accepted),
         **digest,
         "partitions": [asdict(part) for part in parts],
     }
-    return first, manifest
+    return accepted, manifest
+
+
+def acquire_twice(adb: AdbClient) -> tuple[bytes, dict]:
+    """Compatibility alias; acquisition now applies the stricter v2 policy."""
+
+    return acquire_stable(adb)
 
 
 def save_backup(path: Path, image: bytes, manifest: dict) -> Path:
@@ -335,13 +412,41 @@ def validate_preserved_backup(path: Path) -> dict[str, str | int]:
         manifest = json.loads(manifest_path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
         raise ProtocolError("preserved backup manifest is unreadable") from exc
-    if manifest.get("format") != "cc2flash-backup-v1":
-        raise ProtocolError("preserved backup manifest has an unknown format")
+    if manifest.get("format") != "cc2flash-backup-v2":
+        raise ProtocolError(
+            "preserved backup requires a v2 manifest with three identical reads"
+        )
     for key in ("size", "sha256", "md5"):
         if manifest.get(key) != result[key]:
             raise ProtocolError(f"preserved backup manifest {key} does not match the file")
-    if manifest.get("read_passes", 0) < 2:
-        raise ProtocolError("preserved backup was not acquired twice")
+    expected_bootloader = bootloader_reference(data)
+    recorded_bootloader = manifest.get("bootloader")
+    if not isinstance(recorded_bootloader, dict):
+        raise ProtocolError("preserved backup manifest has no bootloader fingerprint")
+    for key, expected in expected_bootloader.items():
+        if recorded_bootloader.get(key) != expected:
+            raise ProtocolError(
+                f"preserved backup manifest bootloader {key} does not match the file"
+            )
+    acceptance = recorded_bootloader.get("acceptance")
+    if expected_bootloader["known_reference"]:
+        if acceptance != "known-reference":
+            raise ProtocolError("known bootloader lacks known-reference acceptance")
+    elif acceptance != "explicit-hash":
+        raise ProtocolError("unknown bootloader lacks explicit exact-hash acceptance")
+    if manifest.get("required_identical_reads") != REQUIRED_IDENTICAL_READS:
+        raise ProtocolError("preserved backup does not require three identical reads")
+    if manifest.get("consecutive_identical_reads", 0) < REQUIRED_IDENTICAL_READS:
+        raise ProtocolError(
+            "preserved backup lacks three consecutive identical physical reads"
+        )
+    read_passes = manifest.get("read_passes", 0)
+    if not isinstance(read_passes, int) or not (
+        REQUIRED_IDENTICAL_READS <= read_passes <= MAX_READ_ATTEMPTS
+    ):
+        raise ProtocolError("preserved backup has an invalid physical-read count")
+    if manifest.get("maximum_read_attempts") != MAX_READ_ATTEMPTS:
+        raise ProtocolError("preserved backup has an unexpected read-attempt policy")
     recorded_parts = manifest.get("partitions")
     if not isinstance(recorded_parts, list):
         raise ProtocolError("preserved backup manifest has no partition map")
