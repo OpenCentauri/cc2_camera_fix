@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 import sys
 import time
@@ -16,6 +17,7 @@ from .adb_backup import (
     acquire_stable,
     hashes,
     save_backup,
+    validate_backup_archive_path,
     validate_preserved_backup,
 )
 from .hid_transport import (
@@ -71,6 +73,18 @@ def _sha256_argument(value: str) -> str:
     return normalized
 
 
+def _positive_finite_duration(value: str) -> float:
+    try:
+        duration = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("duration must be a number") from exc
+    if not math.isfinite(duration) or duration <= 0:
+        raise argparse.ArgumentTypeError(
+            "duration must be a finite positive number"
+        )
+    return duration
+
+
 def command_list(args) -> int:
     result: dict[str, object] = {"hid": [], "adb": []}
     try:
@@ -110,6 +124,9 @@ def command_info(args) -> int:
 
 def command_backup(args) -> int:
     output = Path(args.output)
+    # Reject a non-atomic destination form before spending time on any physical
+    # reads. A single ZIP is the publication unit consumed by restore.
+    validate_backup_archive_path(output)
     adb = _adb(args)
 
     # Safety ordering is intentional and must not be reversed:
@@ -158,7 +175,7 @@ def command_backup(args) -> int:
             f"  {' '.join(rerun)}"
         )
 
-    manifest_path = save_backup(output, image, manifest)
+    archive_path = save_backup(output, image, manifest)
     print(
         "Backup complete (three consecutive identical full reads; "
         f"{manifest['read_passes']} total attempt(s))"
@@ -171,8 +188,8 @@ def command_backup(args) -> int:
         "Known bootloader: "
         f"{'yes' if bootloader['known_reference'] else 'no (explicitly accepted)'}"
     )
-    print(f"Saved:  {output}")
-    print(f"Manifest: {manifest_path}")
+    print(f"Saved archive: {archive_path}")
+    print("Archive members: flash.bin, manifest.json")
     return 0
 
 
@@ -187,7 +204,7 @@ def command_start_adb(args) -> int:
     else:
         identity, _parts = adb.identity_and_partitions()
         print(f"ADB is already online; no HID command was sent. Identity: {identity}")
-        print("You can now run cc2flash backup <output.bin>.")
+        print("You can now run cc2flash backup <output.zip>.")
         return 0
 
     print(
@@ -203,7 +220,7 @@ def command_start_adb(args) -> int:
     identity, _parts = adb.identity_and_partitions()
     print(f"ADB started for this boot. Root identity: {identity}")
     print("No flash backup was read and no persistent startup file was installed.")
-    print("Now run cc2flash backup <output.bin>.")
+    print("Now run cc2flash backup <output.zip>.")
     return 0
 
 
@@ -217,7 +234,7 @@ def command_install_adb_startup(args) -> int:
         print(f"ADB is unavailable: {unavailable}", file=sys.stderr)
     else:
         print("ADB is already online; no persistent startup file was installed.")
-        print("You can now run cc2flash backup <output.bin>.")
+        print("You can now run cc2flash backup <output.zip>.")
         return 0
 
     print("Persistent ADB installation will modify the camera:", file=sys.stderr)
@@ -243,7 +260,7 @@ def command_install_adb_startup(args) -> int:
     print(f"Installed ADB startup hook: {ADB_STARTUP_PATH}")
     print("No flash was read and no backup file was created.")
     print("Restart or power-cycle the camera, wait for normal USB mode, then run:")
-    print("  " + " ".join(_common_command(args, "backup")) + " <output.bin>")
+    print("  " + " ".join(_common_command(args, "backup")) + " <output.zip>")
     return 3
 
 
@@ -362,7 +379,10 @@ def parser() -> argparse.ArgumentParser:
             "strictly read-only"
         ),
     )
-    backup.add_argument("output")
+    backup.add_argument(
+        "output",
+        help="single ZIP archive to publish; must end in .zip",
+    )
     backup.add_argument(
         "--accept-bootloader-hash",
         type=_sha256_argument,
@@ -382,7 +402,7 @@ def parser() -> argparse.ArgumentParser:
     )
     start_adb.add_argument(
         "--timeout",
-        type=float,
+        type=_positive_finite_duration,
         default=30,
         help="seconds to wait for ADB after temporary HID startup (default: 30)",
     )
@@ -406,12 +426,22 @@ def parser() -> argparse.ArgumentParser:
 
     restore = commands.add_parser("restore", parents=[common], help="restore one full 8 MiB image")
     restore.add_argument("image")
-    restore.add_argument("--backup", required=True, help="preserved backup with cc2flash manifest")
+    restore.add_argument(
+        "--backup",
+        required=True,
+        help="preserved cc2flash .zip archive",
+    )
     restore.add_argument("--yes", action="store_true", help="skip typed confirmation")
     restore.add_argument("--no-post-verify", action="store_true", help="skip normal-mode ADB readback")
-    restore.add_argument("--enumeration-timeout", type=float, default=30)
-    restore.add_argument("--reboot-timeout", type=float, default=180)
-    restore.add_argument("--adb-timeout", type=float, default=60)
+    restore.add_argument(
+        "--enumeration-timeout", type=_positive_finite_duration, default=30
+    )
+    restore.add_argument(
+        "--reboot-timeout", type=_positive_finite_duration, default=180
+    )
+    restore.add_argument(
+        "--adb-timeout", type=_positive_finite_duration, default=60
+    )
     restore.set_defaults(func=command_restore)
     return result
 

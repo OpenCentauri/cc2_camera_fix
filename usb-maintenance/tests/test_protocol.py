@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import json
 from pathlib import Path
 import struct
 import sys
@@ -11,10 +10,13 @@ import unittest
 from unittest import mock
 from contextlib import redirect_stderr, redirect_stdout
 from types import SimpleNamespace
+import zipfile
 
 from cc2flash.adb_backup import (
     AdbClient,
     AdbUnavailable,
+    BACKUP_IMAGE_MEMBER,
+    BACKUP_MANIFEST_MEMBER,
     EXPECTED_PARTITIONS,
     KNOWN_BOOTLOADER_SHA256,
     MAX_READ_ATTEMPTS,
@@ -24,6 +26,7 @@ from cc2flash.adb_backup import (
     hashes,
     parse_proc_mtd,
     save_backup,
+    validate_backup_archive_path,
     validate_partition_map,
     validate_preserved_backup,
 )
@@ -198,12 +201,37 @@ class BackupTests(unittest.TestCase):
         self.assertEqual(progress.call_count, 3)
         manifest["bootloader"]["acceptance"] = "explicit-hash"
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "backup.bin"
-            manifest_path = save_backup(path, acquired, manifest)
-            self.assertTrue(manifest_path.is_file())
+            path = Path(directory) / "backup.zip"
+            archive_path = save_backup(path, acquired, manifest)
+            self.assertEqual(archive_path, path)
+            with zipfile.ZipFile(path) as archive:
+                self.assertEqual(
+                    set(archive.namelist()),
+                    {BACKUP_IMAGE_MEMBER, BACKUP_MANIFEST_MEMBER},
+                )
+                self.assertEqual(archive.read(BACKUP_IMAGE_MEMBER), acquired)
             self.assertEqual(validate_preserved_backup(path)["sha256"], manifest["sha256"])
             with self.assertRaisesRegex(ProtocolError, "overwrite"):
                 save_backup(path, acquired, manifest)
+
+    def test_backup_requires_zip_destination(self):
+        with self.assertRaisesRegex(ProtocolError, "must be a .zip"):
+            validate_backup_archive_path(Path("backup.bin"))
+
+    def test_failed_archive_publish_leaves_no_final_or_half_backup(self):
+        image = b"\0" * FLASH_SIZE
+        manifest = {"format": "test", **hashes(image)}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "backup.zip"
+            with (
+                mock.patch.object(
+                    Path, "replace", side_effect=OSError("publish failed")
+                ),
+                self.assertRaisesRegex(OSError, "publish failed"),
+            ):
+                save_backup(path, image, manifest)
+            self.assertFalse(path.exists())
+            self.assertEqual(list(Path(directory).iterdir()), [])
 
     def test_reads_settle_after_initial_mismatch(self):
         parts = parse_proc_mtd(PROC_MTD)
@@ -280,10 +308,38 @@ class BackupTests(unittest.TestCase):
             "partitions": [],
         }
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "backup.bin"
-            path.write_bytes(image)
-            path.with_name(path.name + ".json").write_text(json.dumps(manifest))
+            path = Path(directory) / "backup.zip"
+            save_backup(path, image, manifest)
             with self.assertRaisesRegex(ProtocolError, "v2 manifest"):
+                validate_preserved_backup(path)
+
+    def test_malformed_consecutive_read_count_is_rejected_cleanly(self):
+        image = b"\0" * FLASH_SIZE
+        manifest = {
+            "format": "cc2flash-backup-v2",
+            **hashes(image),
+            "required_identical_reads": 3,
+            "consecutive_identical_reads": "three",
+            "read_passes": 3,
+            "maximum_read_attempts": 5,
+            "bootloader": {
+                **bootloader_reference(image),
+                "acceptance": "explicit-hash",
+            },
+            "partitions": [
+                {
+                    "index": index,
+                    "size": size,
+                    "erase_size": 0x8000,
+                    "name": name,
+                }
+                for index, (name, size) in enumerate(EXPECTED_PARTITIONS)
+            ],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "backup.zip"
+            save_backup(path, image, manifest)
+            with self.assertRaisesRegex(ProtocolError, "three consecutive"):
                 validate_preserved_backup(path)
 
     def test_adb_absence_is_distinguished_for_bootstrap(self):
@@ -412,7 +468,31 @@ class BackupTests(unittest.TestCase):
             self.assertRaisesRegex(ProtocolError, "unauthorized"),
         ):
             client.wait_for_device(timeout=30)
-        check.assert_called_once_with()
+        check.assert_called_once()
+        self.assertGreater(check.call_args.kwargs["timeout"], 0)
+        self.assertLessEqual(check.call_args.kwargs["timeout"], 30)
+        sleep.assert_not_called()
+
+    def test_wait_for_device_caps_get_state_at_remaining_deadline(self):
+        client = AdbClient()
+        offline = SimpleNamespace(
+            returncode=1,
+            stdout=b"",
+            stderr=b"error: device offline\n",
+        )
+        with (
+            mock.patch(
+                "cc2flash.adb_backup.subprocess.run", return_value=offline
+            ) as run,
+            mock.patch(
+                "cc2flash.adb_backup.time.monotonic",
+                side_effect=[100.0, 100.25, 101.0],
+            ),
+            mock.patch("cc2flash.adb_backup.time.sleep") as sleep,
+            self.assertRaisesRegex(ProtocolError, "timed out waiting for ADB"),
+        ):
+            client.wait_for_device(timeout=1)
+        self.assertEqual(run.call_args.kwargs["timeout"], 0.75)
         sleep.assert_not_called()
 
     def test_wait_for_device_timeout_reports_last_transition_state(self):
@@ -423,7 +503,10 @@ class BackupTests(unittest.TestCase):
                 "ensure_available",
                 side_effect=AdbUnavailable("ADB camera is not online (offline)"),
             ),
-            mock.patch("cc2flash.adb_backup.time.monotonic", side_effect=[10.0, 11.0]),
+            mock.patch(
+                "cc2flash.adb_backup.time.monotonic",
+                side_effect=[10.0, 10.25, 11.0],
+            ),
             mock.patch("cc2flash.adb_backup.time.sleep") as sleep,
             self.assertRaisesRegex(ProtocolError, "last state:.*offline"),
         ):
@@ -665,7 +748,7 @@ class CliAdbWorkflowTests(unittest.TestCase):
             redirect_stdout(io.StringIO()),
             redirect_stderr(stderr),
         ):
-            status = cli.main(["backup", "backup.bin"])
+            status = cli.main(["backup", "backup.zip"])
         self.assertEqual(status, 2)
         start.assert_not_called()
         install.assert_not_called()
@@ -674,6 +757,31 @@ class CliAdbWorkflowTests(unittest.TestCase):
         self.assertIn("strictly read-only", error)
         self.assertIn("cc2flash start-adb", error)
         self.assertIn("cc2flash install-adb-startup", error)
+
+    def test_backup_rejects_non_zip_output_before_camera_read(self):
+        with (
+            mock.patch.object(cli, "acquire_stable") as acquire,
+            redirect_stdout(io.StringIO()),
+            redirect_stderr(io.StringIO()),
+        ):
+            status = cli.main(["backup", "backup.bin"])
+        self.assertEqual(status, 2)
+        acquire.assert_not_called()
+
+    def test_start_adb_rejects_nonpositive_or_nonfinite_timeout_before_hid(self):
+        for value in ("0", "-1", "nan", "inf", "-inf"):
+            with self.subTest(value=value):
+                with (
+                    mock.patch.object(
+                        cli, "start_adb_through_upload_command"
+                    ) as start,
+                    redirect_stdout(io.StringIO()),
+                    redirect_stderr(io.StringIO()),
+                    self.assertRaises(SystemExit) as raised,
+                ):
+                    cli.main(["start-adb", "--timeout", value])
+                self.assertEqual(raised.exception.code, 2)
+                start.assert_not_called()
 
     def test_start_adb_is_separate_and_validates_root(self):
         fake_adb = mock.Mock()
@@ -794,15 +902,15 @@ class CliAdbWorkflowTests(unittest.TestCase):
         with (
             mock.patch.object(cli, "acquire_stable", return_value=(image, manifest)) as acquire,
             mock.patch.object(
-                cli, "save_backup", return_value=Path("backup.bin.json")
+                cli, "save_backup", return_value=Path("backup.zip")
             ) as save,
             redirect_stdout(io.StringIO()),
         ):
-            status = cli.main(["backup", "backup.bin"])
+            status = cli.main(["backup", "backup.zip"])
         self.assertEqual(status, 0)
         acquire.assert_called_once()
         self.assertEqual(manifest["bootloader"]["acceptance"], "known-reference")
-        save.assert_called_once_with(Path("backup.bin"), image, manifest)
+        save.assert_called_once_with(Path("backup.zip"), image, manifest)
 
     def test_unknown_bootloader_failure_prints_exact_hash_after_reads(self):
         image = b"image"
@@ -815,7 +923,7 @@ class CliAdbWorkflowTests(unittest.TestCase):
             redirect_stdout(io.StringIO()),
             redirect_stderr(stderr),
         ):
-            status = cli.main(["backup", "backup.bin"])
+            status = cli.main(["backup", "backup.zip"])
         self.assertEqual(status, 2)
         acquire.assert_called_once()
         save.assert_not_called()
@@ -830,16 +938,16 @@ class CliAdbWorkflowTests(unittest.TestCase):
         with (
             mock.patch.object(cli, "acquire_stable", return_value=(image, manifest)),
             mock.patch.object(
-                cli, "save_backup", return_value=Path("backup.bin.json")
+                cli, "save_backup", return_value=Path("backup.zip")
             ) as save,
             redirect_stdout(io.StringIO()),
         ):
             status = cli.main(
-                ["backup", "backup.bin", "--accept-bootloader-hash", observed]
+                ["backup", "backup.zip", "--accept-bootloader-hash", observed]
             )
         self.assertEqual(status, 0)
         self.assertEqual(manifest["bootloader"]["acceptance"], "explicit-hash")
-        save.assert_called_once_with(Path("backup.bin"), image, manifest)
+        save.assert_called_once_with(Path("backup.zip"), image, manifest)
 
     def test_wrong_bootloader_override_prints_observed_and_publishes_nothing(self):
         image = b"image"
@@ -854,7 +962,7 @@ class CliAdbWorkflowTests(unittest.TestCase):
             redirect_stderr(stderr),
         ):
             status = cli.main(
-                ["backup", "backup.bin", "--accept-bootloader-hash", supplied]
+                ["backup", "backup.zip", "--accept-bootloader-hash", supplied]
             )
         self.assertEqual(status, 2)
         save.assert_not_called()

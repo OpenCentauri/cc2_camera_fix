@@ -6,11 +6,14 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
+import os
 from pathlib import Path
 import re
 import subprocess
 import tempfile
 import time
+import zipfile
 from typing import Callable
 
 from .protocol import FLASH_SIZE, ProtocolError
@@ -49,6 +52,17 @@ ReadProgress = Callable[[int, int, int, int], None]
 KNOWN_BOOTLOADER_SHA256 = (
     "5602ec961b4410ccceea0d4910e4fa768c6998bd4ba86143ba50855bdd0b7a54"
 )
+
+# A backup is one archive so the image and the evidence that qualifies it
+# cannot be published as a half-complete pair.  Fixed member names also make the
+# container easy to inspect with any ordinary ZIP tool while keeping restore
+# parsing strict and unambiguous.
+BACKUP_IMAGE_MEMBER = "flash.bin"
+BACKUP_MANIFEST_MEMBER = "manifest.json"
+BACKUP_ARCHIVE_MEMBERS = frozenset(
+    (BACKUP_IMAGE_MEMBER, BACKUP_MANIFEST_MEMBER)
+)
+MAX_MANIFEST_SIZE = 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -180,11 +194,23 @@ class AdbClient:
         immediately.  The caller's deadline bounds the whole transition.
         """
 
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ProtocolError("ADB wait timeout must be a finite positive number")
+
         deadline = time.monotonic() + timeout
         last_state = "ADB has not been checked"
         while True:
+            # Bound the subprocess itself by the caller's remaining deadline.
+            # Checking only after a fixed ten-second get-state call would make
+            # a one-second wait take roughly ten seconds on a hung ADB server.
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ProtocolError(
+                    "timed out waiting for ADB to become online; "
+                    f"last state: {last_state}"
+                )
             try:
-                self.ensure_available()
+                self.ensure_available(timeout=min(10.0, remaining))
                 return
             except AdbUnavailable as exc:
                 last_state = str(exc)
@@ -193,9 +219,10 @@ class AdbClient:
                 # transport as generally startup-eligible: doing so before an
                 # explicit HID action could trigger an unnecessary device
                 # mutation.  It is transient only here, after that action.
-                if (
-                    "adb device is not usable (error: closed)"
-                    not in str(exc).casefold()
+                detail = str(exc).casefold()
+                if not (
+                    "adb device is not usable (error: closed)" in detail
+                    or "adb availability check timed out" in detail
                 ):
                     raise
                 last_state = str(exc)
@@ -208,7 +235,7 @@ class AdbClient:
                 )
             time.sleep(min(0.5, remaining))
 
-    def ensure_available(self) -> None:
+    def ensure_available(self, *, timeout: float = 10.0) -> None:
         """Distinguish an absent device from local ADB/setup errors.
 
         Only ``AdbUnavailable`` is eligible for a normal-HID startup fallback.
@@ -218,10 +245,15 @@ class AdbClient:
         ``ProtocolError`` instances so they cannot cause an unnecessary write.
         """
 
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ProtocolError(
+                "ADB availability timeout must be a finite positive number"
+            )
+
         command = self._base() + ["get-state"]
         try:
             result = subprocess.run(
-                command, capture_output=True, timeout=10, check=False
+                command, capture_output=True, timeout=timeout, check=False
             )
         except FileNotFoundError as exc:
             raise ProtocolError(f"ADB executable not found: {self.executable}") from exc
@@ -369,49 +401,127 @@ def acquire_twice(adb: AdbClient) -> tuple[bytes, dict]:
     return acquire_stable(adb)
 
 
+def validate_backup_archive_path(path: Path) -> None:
+    """Require an unmistakable ZIP destination before any camera read."""
+
+    if path.suffix.casefold() != ".zip":
+        raise ProtocolError(
+            "backup output must be a .zip archive containing flash.bin and "
+            "manifest.json"
+        )
+
+
 def save_backup(path: Path, image: bytes, manifest: dict) -> Path:
-    manifest_path = path.with_name(path.name + ".json")
-    if path.exists() or manifest_path.exists():
+    """Publish image and evidence through one verified same-directory rename.
+
+    The old implementation renamed the raw image and JSON manifest separately.
+    A failure or process exit between those operations could expose an image
+    without the safety evidence required by restore.  Here both members are
+    completed in one temporary ZIP in the destination directory, flushed,
+    reopened for structural/CRC verification, and then exposed at ``path`` by
+    one rename.  A crash before the rename can leave only an unreferenced temp
+    file; it cannot publish half of the final backup.
+    """
+
+    validate_backup_archive_path(path)
+    if len(image) != FLASH_SIZE:
+        raise ProtocolError("cannot save a backup image that is not exactly 8 MiB")
+    if path.exists():
         raise ProtocolError(f"refusing to overwrite existing backup: {path}")
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=path.parent, prefix=path.name + ".", delete=False) as tmp:
-        temp_path = Path(tmp.name)
-        tmp.write(image)
-        tmp.flush()
+    manifest_bytes = (
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
     with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
         dir=path.parent,
-        prefix=manifest_path.name + ".",
+        prefix=f".{path.name}.",
+        suffix=".tmp",
         delete=False,
-    ) as tmp_manifest:
-        temp_manifest_path = Path(tmp_manifest.name)
-        tmp_manifest.write(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
-        tmp_manifest.flush()
+    ) as temporary:
+        temp_path = Path(temporary.name)
+
     try:
+        with zipfile.ZipFile(
+            temp_path,
+            mode="w",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=6,
+            allowZip64=False,
+        ) as archive:
+            archive.writestr(BACKUP_IMAGE_MEMBER, image)
+            archive.writestr(BACKUP_MANIFEST_MEMBER, manifest_bytes)
+
+        # Closing ZipFile writes its central directory. fsync the complete file
+        # before publication, then independently exercise the central directory
+        # and both CRCs. This is deliberately done while the final path is still
+        # absent.
+        with temp_path.open("rb+") as complete_archive:
+            complete_archive.flush()
+            os.fsync(complete_archive.fileno())
+        with zipfile.ZipFile(temp_path, mode="r") as archive:
+            names = archive.namelist()
+            if len(names) != 2 or set(names) != BACKUP_ARCHIVE_MEMBERS:
+                raise ProtocolError("temporary backup ZIP has unexpected members")
+            corrupt_member = archive.testzip()
+            if corrupt_member is not None:
+                raise ProtocolError(
+                    f"temporary backup ZIP failed CRC verification: {corrupt_member}"
+                )
+
+        # Recheck immediately before the one publication step. os.replace is
+        # atomic on the same filesystem, which the same-directory temp file
+        # guarantees. The second check narrows (but cannot eliminate) a race
+        # with another process creating the destination.
+        if path.exists():
+            raise ProtocolError(f"refusing to overwrite existing backup: {path}")
         temp_path.replace(path)
-        temp_manifest_path.replace(manifest_path)
     except Exception:
         temp_path.unlink(missing_ok=True)
-        temp_manifest_path.unlink(missing_ok=True)
         raise
-    return manifest_path
+    return path
 
 
 def validate_preserved_backup(path: Path) -> dict[str, str | int]:
     if not path.is_file():
         raise ProtocolError(f"preserved backup does not exist: {path}")
-    data = path.read_bytes()
-    if len(data) != FLASH_SIZE:
-        raise ProtocolError("preserved backup is not exactly 8 MiB")
-    result = hashes(data)
-    manifest_path = path.with_name(path.name + ".json")
-    if not manifest_path.is_file():
-        raise ProtocolError("preserved backup has no cc2flash JSON manifest")
+    validate_backup_archive_path(path)
+
+    # Reject ambiguity, duplicate names, encryption, oversized evidence, and a
+    # wrong advertised image size before decompressing either member. ZipFile
+    # checks each member's CRC while read() consumes it completely.
     try:
-        manifest = json.loads(manifest_path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
+        with zipfile.ZipFile(path, mode="r") as archive:
+            infos = archive.infolist()
+            names = [item.filename for item in infos]
+            if len(names) != 2 or set(names) != BACKUP_ARCHIVE_MEMBERS:
+                raise ProtocolError(
+                    "preserved backup ZIP must contain exactly flash.bin and "
+                    "manifest.json"
+                )
+            by_name = {item.filename: item for item in infos}
+            if any(item.flag_bits & 0x1 for item in infos):
+                raise ProtocolError("preserved backup ZIP must not be encrypted")
+            if by_name[BACKUP_IMAGE_MEMBER].file_size != FLASH_SIZE:
+                raise ProtocolError("preserved backup image is not exactly 8 MiB")
+            if by_name[BACKUP_MANIFEST_MEMBER].file_size > MAX_MANIFEST_SIZE:
+                raise ProtocolError("preserved backup manifest is unexpectedly large")
+            data = archive.read(BACKUP_IMAGE_MEMBER)
+            manifest_bytes = archive.read(BACKUP_MANIFEST_MEMBER)
+    except ProtocolError:
+        raise
+    except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
+        raise ProtocolError("preserved backup ZIP is unreadable or corrupt") from exc
+
+    if len(data) != FLASH_SIZE:
+        raise ProtocolError("preserved backup image is not exactly 8 MiB")
+    result = hashes(data)
+    try:
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ProtocolError("preserved backup manifest is unreadable") from exc
+    if not isinstance(manifest, dict):
+        raise ProtocolError("preserved backup manifest must be a JSON object")
     if manifest.get("format") != "cc2flash-backup-v2":
         raise ProtocolError(
             "preserved backup requires a v2 manifest with three identical reads"
@@ -436,12 +546,13 @@ def validate_preserved_backup(path: Path) -> dict[str, str | int]:
         raise ProtocolError("unknown bootloader lacks explicit exact-hash acceptance")
     if manifest.get("required_identical_reads") != REQUIRED_IDENTICAL_READS:
         raise ProtocolError("preserved backup does not require three identical reads")
-    if manifest.get("consecutive_identical_reads", 0) < REQUIRED_IDENTICAL_READS:
+    consecutive = manifest.get("consecutive_identical_reads")
+    if type(consecutive) is not int or consecutive < REQUIRED_IDENTICAL_READS:
         raise ProtocolError(
             "preserved backup lacks three consecutive identical physical reads"
         )
-    read_passes = manifest.get("read_passes", 0)
-    if not isinstance(read_passes, int) or not (
+    read_passes = manifest.get("read_passes")
+    if type(read_passes) is not int or not (
         REQUIRED_IDENTICAL_READS <= read_passes <= MAX_READ_ATTEMPTS
     ):
         raise ProtocolError("preserved backup has an invalid physical-read count")
