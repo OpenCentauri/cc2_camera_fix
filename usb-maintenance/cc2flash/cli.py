@@ -8,7 +8,6 @@ import json
 import math
 from pathlib import Path
 import sys
-import time
 
 from . import __version__
 from .adb_backup import (
@@ -334,18 +333,25 @@ def command_restore(args) -> int:
         "Normal mode returned; requiring three consecutive identical flash "
         "reads for post-write verification."
     )
-    deadline = time.monotonic() + args.adb_timeout
-    while True:
-        try:
-            verified, _manifest = acquire_stable(_adb(args), progress=_read_progress)
-            break
-        except ProtocolError:
-            if time.monotonic() >= deadline:
-                raise ProtocolError(
-                    "normal HID returned, but ADB readback did not become available; "
-                    "write is not post-verified"
-                )
-            time.sleep(1)
+    adb = _adb(args)
+    try:
+        # --adb-timeout deliberately bounds only the transition to an online
+        # daemon. Stable acquisition is a separate operation: each pull keeps
+        # its normal command timeout and no completed read is discarded merely
+        # because the availability window expired while verification ran.
+        adb.wait_for_device(timeout=args.adb_timeout)
+    except ProtocolError as exc:
+        raise ProtocolError(
+            "normal HID returned, but ADB readback did not become available; "
+            "write is not post-verified"
+        ) from exc
+    try:
+        verified, _manifest = acquire_stable(adb, progress=_read_progress)
+    except ProtocolError as exc:
+        raise ProtocolError(
+            "ADB became available, but stable post-write readback failed; "
+            f"write is not post-verified: {exc}"
+        ) from exc
     if verified != image:
         raise ProtocolError("post-write flash readback differs from the replacement image")
     print(
@@ -440,7 +446,13 @@ def parser() -> argparse.ArgumentParser:
         "--reboot-timeout", type=_positive_finite_duration, default=180
     )
     restore.add_argument(
-        "--adb-timeout", type=_positive_finite_duration, default=60
+        "--adb-timeout",
+        type=_positive_finite_duration,
+        default=60,
+        help=(
+            "seconds to wait for ADB to become online before post-write "
+            "verification starts (default: 60; does not cap the reads)"
+        ),
     )
     restore.set_defaults(func=command_restore)
     return result

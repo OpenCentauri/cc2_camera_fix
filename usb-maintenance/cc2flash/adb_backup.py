@@ -412,15 +412,17 @@ def validate_backup_archive_path(path: Path) -> None:
 
 
 def save_backup(path: Path, image: bytes, manifest: dict) -> Path:
-    """Publish image and evidence through one verified same-directory rename.
+    """Publish image and evidence through one atomic create-if-absent link.
 
     The old implementation renamed the raw image and JSON manifest separately.
     A failure or process exit between those operations could expose an image
     without the safety evidence required by restore.  Here both members are
-    completed in one temporary ZIP in the destination directory, flushed,
-    reopened for structural/CRC verification, and then exposed at ``path`` by
-    one rename.  A crash before the rename can leave only an unreferenced temp
-    file; it cannot publish half of the final backup.
+    completed in one temporary ZIP in the destination directory, flushed, and
+    reopened for structural/CRC verification. A same-filesystem hard link then
+    exposes it at ``path`` only if that name is still absent. This makes both
+    publication and overwrite refusal atomic. A crash before publication can
+    leave only an unreferenced temp file; a crash after it can leave two names
+    for the same complete archive, never a half-backup.
     """
 
     validate_backup_archive_path(path)
@@ -469,16 +471,25 @@ def save_backup(path: Path, image: bytes, manifest: dict) -> Path:
                     f"temporary backup ZIP failed CRC verification: {corrupt_member}"
                 )
 
-        # Recheck immediately before the one publication step. os.replace is
-        # atomic on the same filesystem, which the same-directory temp file
-        # guarantees. The second check narrows (but cannot eliminate) a race
-        # with another process creating the destination.
-        if path.exists():
-            raise ProtocolError(f"refusing to overwrite existing backup: {path}")
-        temp_path.replace(path)
+        # Linking is an atomic create-if-absent operation. Unlike Path.replace,
+        # it cannot overwrite an archive another process publishes after the
+        # early existence check. The same-directory temporary file guarantees
+        # both names are on the same filesystem.
+        try:
+            os.link(temp_path, path)
+        except FileExistsError as exc:
+            raise ProtocolError(
+                f"refusing to overwrite existing backup: {path}"
+            ) from exc
     except Exception:
         temp_path.unlink(missing_ok=True)
         raise
+    try:
+        temp_path.unlink(missing_ok=True)
+    except OSError:
+        # Publication already succeeded. A hidden second hard-link name is
+        # untidy but does not invalidate or expose a partial final archive.
+        pass
     return path
 
 
@@ -510,7 +521,7 @@ def validate_preserved_backup(path: Path) -> dict[str, str | int]:
             manifest_bytes = archive.read(BACKUP_MANIFEST_MEMBER)
     except ProtocolError:
         raise
-    except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
+    except (OSError, RuntimeError, NotImplementedError, zipfile.BadZipFile) as exc:
         raise ProtocolError("preserved backup ZIP is unreadable or corrupt") from exc
 
     if len(data) != FLASH_SIZE:
@@ -547,7 +558,7 @@ def validate_preserved_backup(path: Path) -> dict[str, str | int]:
     if manifest.get("required_identical_reads") != REQUIRED_IDENTICAL_READS:
         raise ProtocolError("preserved backup does not require three identical reads")
     consecutive = manifest.get("consecutive_identical_reads")
-    if type(consecutive) is not int or consecutive < REQUIRED_IDENTICAL_READS:
+    if type(consecutive) is not int or consecutive != REQUIRED_IDENTICAL_READS:
         raise ProtocolError(
             "preserved backup lacks three consecutive identical physical reads"
         )

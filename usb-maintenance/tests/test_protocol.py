@@ -224,14 +224,37 @@ class BackupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "backup.zip"
             with (
-                mock.patch.object(
-                    Path, "replace", side_effect=OSError("publish failed")
+                mock.patch(
+                    "cc2flash.adb_backup.os.link",
+                    side_effect=OSError("publish failed"),
                 ),
                 self.assertRaisesRegex(OSError, "publish failed"),
             ):
                 save_backup(path, image, manifest)
             self.assertFalse(path.exists())
             self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_concurrent_archive_publish_is_not_overwritten(self):
+        image = b"\0" * FLASH_SIZE
+        manifest = {"format": "test", **hashes(image)}
+        competing_contents = b"another process published this"
+
+        def publish_competing_archive(_source, destination):
+            Path(destination).write_bytes(competing_contents)
+            raise FileExistsError("destination appeared concurrently")
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "backup.zip"
+            with (
+                mock.patch(
+                    "cc2flash.adb_backup.os.link",
+                    side_effect=publish_competing_archive,
+                ),
+                self.assertRaisesRegex(ProtocolError, "overwrite"),
+            ):
+                save_backup(path, image, manifest)
+            self.assertEqual(path.read_bytes(), competing_contents)
+            self.assertEqual(list(Path(directory).iterdir()), [path])
 
     def test_reads_settle_after_initial_mismatch(self):
         parts = parse_proc_mtd(PROC_MTD)
@@ -340,6 +363,50 @@ class BackupTests(unittest.TestCase):
             path = Path(directory) / "backup.zip"
             save_backup(path, image, manifest)
             with self.assertRaisesRegex(ProtocolError, "three consecutive"):
+                validate_preserved_backup(path)
+
+    def test_impossible_consecutive_read_count_is_rejected(self):
+        image = b"\0" * FLASH_SIZE
+        manifest = {
+            "format": "cc2flash-backup-v2",
+            **hashes(image),
+            "required_identical_reads": 3,
+            "consecutive_identical_reads": 999,
+            "read_passes": 3,
+            "maximum_read_attempts": 5,
+            "bootloader": {
+                **bootloader_reference(image),
+                "acceptance": "explicit-hash",
+            },
+            "partitions": [
+                {
+                    "index": index,
+                    "size": size,
+                    "erase_size": 0x8000,
+                    "name": name,
+                }
+                for index, (name, size) in enumerate(EXPECTED_PARTITIONS)
+            ],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "backup.zip"
+            save_backup(path, image, manifest)
+            with self.assertRaisesRegex(ProtocolError, "three consecutive"):
+                validate_preserved_backup(path)
+
+    def test_unsupported_zip_compression_is_rejected_cleanly(self):
+        image = b"\0" * FLASH_SIZE
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "backup.zip"
+            save_backup(path, image, {"format": "test", **hashes(image)})
+            with (
+                mock.patch.object(
+                    zipfile.ZipFile,
+                    "read",
+                    side_effect=NotImplementedError("unsupported compression"),
+                ),
+                self.assertRaisesRegex(ProtocolError, "unreadable or corrupt"),
+            ):
                 validate_preserved_backup(path)
 
     def test_adb_absence_is_distinguished_for_bootstrap(self):
@@ -967,6 +1034,48 @@ class CliAdbWorkflowTests(unittest.TestCase):
         self.assertEqual(status, 2)
         save.assert_not_called()
         self.assertIn(observed, stderr.getvalue())
+
+    def test_restore_adb_timeout_only_bounds_availability_wait(self):
+        image = b"replacement image"
+        fake_adb = mock.Mock()
+        plan = mock.sentinel.plan
+        with tempfile.TemporaryDirectory() as directory:
+            image_path = Path(directory) / "replacement.bin"
+            image_path.write_bytes(image)
+            args = SimpleNamespace(
+                image=str(image_path),
+                backup="backup.zip",
+                yes=True,
+                enumeration_timeout=30,
+                reboot_timeout=180,
+                no_post_verify=False,
+                adb_timeout=7,
+                adb="adb",
+                serial=None,
+            )
+            with (
+                mock.patch.object(
+                    cli,
+                    "validate_preserved_backup",
+                    return_value={"sha256": "different"},
+                ),
+                mock.patch.object(cli, "validate_full_restore_image"),
+                mock.patch.object(
+                    cli, "build_update_blob", return_value=(b"blob", plan)
+                ),
+                mock.patch.object(cli, "enter_bootloader"),
+                mock.patch.object(cli, "wait_for_hid"),
+                mock.patch.object(cli, "restore_blob"),
+                mock.patch.object(cli, "_adb", return_value=fake_adb),
+                mock.patch.object(
+                    cli, "acquire_stable", return_value=(image, {})
+                ) as acquire,
+                redirect_stdout(io.StringIO()),
+            ):
+                status = cli.command_restore(args)
+        self.assertEqual(status, 0)
+        fake_adb.wait_for_device.assert_called_once_with(timeout=7)
+        acquire.assert_called_once_with(fake_adb, progress=cli._read_progress)
 
 
 if __name__ == "__main__":
