@@ -17,8 +17,6 @@
   returns without the persistent hook, requires exact readback through the end
   of HWCONFIG, and reports config changes caused by the verification boot
   instead of incorrectly claiming a full byte-exact mismatch.
-- Aligned hardware recovery's strict partition-manifest validation with the
-  current USB backup producer: `0x4000` erase sizes and case-insensitive names.
 - Expanded the offline suite from 78 to 83 tests, including allowed-region
   interoperability, wrong-unit rejection, offline pair planning, post-boot
   config handling, temporary ADB startup, and proof that a compatibility

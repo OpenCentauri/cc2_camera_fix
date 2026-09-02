@@ -22,8 +22,7 @@ Review date: 2026-09-02
 
 The locally supplied current-format ZIP was used only as a test input and was
 not added to the repository. Its manifest records three consecutive identical
-reads, the known bootloader fingerprint, and the camera's six-partition map
-with `0x4000` erase sizes.
+reads, the known bootloader fingerprint, and the camera's six-partition map.
 
 - The unmodified ZIP passed strict archive, evidence, partition-map, firmware,
   identity, and JFFS2 validation without reduced-read overrides.

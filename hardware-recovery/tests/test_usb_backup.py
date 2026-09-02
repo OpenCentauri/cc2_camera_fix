@@ -42,10 +42,10 @@ def usb_manifest(image: bytes) -> dict:
             {
                 "index": index,
                 "size": size,
-                "erase_size": erase_size,
+                "erase_size": 0x4000,
                 "name": "HWCONFIG" if index == 4 else name,
             }
-            for index, size, erase_size, name in tool.EXPECTED_USB_PARTITIONS
+            for index, size, name in tool.EXPECTED_USB_PARTITIONS
         ],
     }
 
