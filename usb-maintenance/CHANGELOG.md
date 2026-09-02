@@ -40,7 +40,7 @@
   of one ordinary ZIP. The completed archive is flushed, CRC-checked, and
   exposed through an atomic same-filesystem create-if-absent hard link. This
   eliminates both the prior half-pair window and concurrent overwrite race.
-  Restore consumes the ZIP directly and rejects legacy two-read manifests.
+  Restore consumes the ZIP directly and rejects two-read v1 manifests.
 - Makes the ADB startup deadline bound each `get-state` subprocess and rejects
   zero, negative, infinite, and NaN durations before sending HID.
 - Type-checks untrusted manifest counters before comparison, so malformed JSON

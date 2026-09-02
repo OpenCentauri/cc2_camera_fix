@@ -20,7 +20,7 @@ Review date: 2026-09-02
 
 ## Attached raw USB-dump interoperability
 
-The locally supplied raw USB dump and adjacent older v1 JSON were used only as
+The locally supplied raw USB dump and adjacent v1 JSON were used only as
 test inputs and were not added to the repository. The raw 8 MiB image is a
 normal hardware-recovery input. Because its v1 sidecar records only two reads,
 the test used explicit reduced-read acceptance rather than representing that

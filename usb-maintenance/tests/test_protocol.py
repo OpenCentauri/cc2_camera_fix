@@ -355,7 +355,7 @@ class BackupTests(unittest.TestCase):
             expected_observed == KNOWN_BOOTLOADER_SHA256,
         )
 
-    def test_restore_rejects_legacy_two_read_manifest(self):
+    def test_restore_rejects_two_read_v1_manifest(self):
         image = b"\0" * FLASH_SIZE
         manifest = {
             "format": "cc2flash-backup-v1",

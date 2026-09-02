@@ -1,4 +1,4 @@
-2579537bd11cc800f3b2cb13023700de9ba1c74cd43dfc3ca919d16af012f0e1  ./CHANGELOG.md
+45535e18e137dca436ee4487889c11724470a28af1b294e1053804e9fd002b74  ./CHANGELOG.md
 0befef79d715414085b8642f072ae4b2e5657a25c192c3e5df4dd4b4288174b9  ./EVIDENCE.md
 adb776502883422ea07cc4f11ca9b45e5aec7a6d40320ea0e9d0bfe0348e4f3a  ./PROJECT-STATUS.md
 fef49c4a3c77193c571d584c873beb6c9dc8d922d8a3f8c38275b650dd0de71e  ./PROTOCOL.md
@@ -21,7 +21,7 @@ fef49c4a3c77193c571d584c873beb6c9dc8d922d8a3f8c38275b650dd0de71e  ./source-recon
 e0ea49659511c879a72e7e7e6ad1d0db9ec34fcb70ea011f2f3d7f0a7ccaba15  ./source-reconstruction/verify_protocol_vectors.py
 01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b  ./tests/__init__.py
 63cefbfa71257b4cb0224d0ec2561ecbb966c97aca7d17643f3bf8fea1db281d  ./tests/test_commands.py
-5455860a1ac9814c41690099820030f3bfff8c10fb7369ce536e3bad43f59aea  ./tests/test_protocol.py
+c37c97c9d0ea93b26e25d16f5a6546efa56246fdff3444437ffac57b7eac9c79  ./tests/test_protocol.py
 8f41651b7e94deba5d3e22873e4f9e8a6cfbbd739396e98cead53cd1b8738007  ./tools/README.md
 4741175ec415490e154f5927a1b463d8fed5f74e24d9dc09c1f82c8cd8921090  ./tools/mips32_disasm.py
 23c8a1a5a33efffdf659577878d47b1989a2f62414262913a3ea9afbdd99d0f4  ./tools/mips_pic_xrefs.py

@@ -114,78 +114,80 @@ SHA-256 hashes as shown below. For a USB backup ZIP, the builder validates
 partition map, and three-consecutive-read acquisition evidence. A valid ZIP
 therefore satisfies the three-read gate directly; do not extract or rewrite it.
 
-The examples below use the Windows Python launcher because NeoProgrammer is a Windows application. On Linux or macOS, replace `py` with `python3`.
+The command-line examples in this section use a normal Unix shell and
+`python3`. The later NeoProgrammer walkthrough uses Windows syntax where the
+programmer software requires it.
 
 Run the internal self-test. Supplying a supported ROM also exercises the complete readable SquashFS patch path:
 
-```bat
-py cc2_sig_tool.py self-test cc2-camera-1.bin
+```sh
+python3 cc2_sig_tool.py self-test cc2-camera-1.bin
 ```
 
 Analyze without creating anything:
 
-```bat
-py cc2_sig_tool.py analyze cc2-camera-1.bin
+```sh
+python3 cc2_sig_tool.py analyze cc2-camera-1.bin
 ```
 
 The equivalent USB-backup workflow is:
 
-```bat
-py cc2_sig_tool.py analyze backup.zip
-py cc2_sig_tool.py build backup.zip
+```sh
+python3 cc2_sig_tool.py analyze backup.zip
+python3 cc2_sig_tool.py build backup.zip
 ```
 
 The second command creates
-`backup-cc2-recovery\cc2-camera-recovery.bin`. Keep the original
+`backup-cc2-recovery/cc2-camera-recovery.bin`. Keep the original
 `backup.zip` unchanged: USB maintenance uses it both as the preserved
 three-read backup and to prove that the recovery image belongs to the same
 camera before restoring it.
 
 Choose the config treatment explicitly when the default is not appropriate:
 
-```bat
-rem Default: wipe ordinary config and preserve only serial.cfg
-py cc2_sig_tool.py build backup.zip --config-mode clean-data
+```sh
+# Default: wipe ordinary config and preserve only serial.cfg
+python3 cc2_sig_tool.py build backup.zip --config-mode clean-data
 
-rem Same clean rebuild, after explicitly approving unfamiliar config names
-py cc2_sig_tool.py build backup.zip --wipe-unknown-config
+# Same clean rebuild, after explicitly approving unfamiliar config names
+python3 cc2_sig_tool.py build backup.zip --wipe-unknown-config
 
-rem Recreate every live regular config file once, without dead JFFS2 copies
-py cc2_sig_tool.py build backup.zip --config-mode preserve-data
+# Recreate every live regular config file once, without dead JFFS2 copies
+python3 cc2_sig_tool.py build backup.zip --config-mode preserve-data
 ```
 
 Raw 8 MiB backups are first-class inputs. For a bricked camera, raw dumps made
 with an external programmer are the only acquisition path; supply three stable
-reads with `--confirm` as described below. An older USB export may also consist
-of a raw `.bin` plus `cc2flash-backup-v1` JSON. The raw image remains valid
-input, but that two-read JSON is not accepted as three-read evidence. Supply
-independent confirmation dumps or use `--allow-fewer-reads`; the tool does not
-upgrade or invent missing acquisition evidence.
+reads with `--confirm` as described below. A USB export may consist of a raw
+`.bin` plus `cc2flash-backup-v1` JSON. The raw image remains valid input, but
+that two-read JSON is not accepted as three-read evidence. Supply independent
+confirmation dumps or use `--allow-fewer-reads`; the tool does not upgrade or
+invent missing acquisition evidence.
 
 Build a recovery bundle and require three physical reads to be byte-identical:
 
-```bat
-py cc2_sig_tool.py build cc2-camera-1.bin --confirm cc2-camera-2.bin cc2-camera-3.bin
+```sh
+python3 cc2_sig_tool.py build cc2-camera-1.bin --confirm cc2-camera-2.bin cc2-camera-3.bin
 ```
 
 For a non-reference unit, three byte-identical physical reads are required by default. With fewer reads, the tool refuses unless the higher risk is explicitly accepted:
 
-```bat
-py cc2_sig_tool.py build cc2-camera-1.bin --allow-fewer-reads
+```sh
+python3 cc2_sig_tool.py build cc2-camera-1.bin --allow-fewer-reads
 ```
 
 Exact full reference dumps listed in `REFERENCE_FINGERPRINTS.json` may be rebuilt from one copy because their complete 8 MiB hashes already match known inputs.
 
 To validate the complete USB round trip without opening USB:
 
-```bat
-cc2flash plan-restore backup-cc2-recovery\cc2-camera-recovery.bin --backup backup.zip
+```sh
+cc2flash plan-restore backup-cc2-recovery/cc2-camera-recovery.bin --backup backup.zip
 ```
 
 If that passes, the corresponding guarded write command is:
 
-```bat
-cc2flash restore backup-cc2-recovery\cc2-camera-recovery.bin --backup backup.zip
+```sh
+cc2flash restore backup-cc2-recovery/cc2-camera-recovery.bin --backup backup.zip
 ```
 
 USB maintenance refuses the candidate if any byte outside this builder's
@@ -219,12 +221,13 @@ SHA256SUMS.txt
 
 To patch only `bashrc.sh` while preserving the current config partition byte-for-byte:
 
-```bat
-py cc2_sig_tool.py build cc2-camera-1.bin --keep-config
+```sh
+python3 cc2_sig_tool.py build cc2-camera-1.bin --keep-config
 ```
 
 This option is accepted only when the partition already equals the exact canonical rebuild. It refuses exhausted or otherwise noncanonical config, because preserving one could leave the device bricked.
-It cannot be combined with `preserve-data` or `--wipe-unknown-config`.
+It cannot be combined with `--config-mode preserve-data` or
+`--wipe-unknown-config`.
 
 ## Programmer instructions
 
