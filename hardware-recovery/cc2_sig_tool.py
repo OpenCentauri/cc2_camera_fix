@@ -25,13 +25,15 @@ import lzma
 import re
 import struct
 import sys
+import zipfile
 import zlib
 from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable
 
-TOOL_VERSION = "1.1.0"
+TOOL_VERSION = "1.2.0"
 MIN_IDENTICAL_READS = 3
+MAX_USB_READ_ATTEMPTS = 5
 
 FLASH_SIZE = 0x800000
 PATCH_START = 0x463000
@@ -40,6 +42,25 @@ PATCH_SIZE = PATCH_END - PATCH_START
 CONFIG_START = 0x7E0000
 CONFIG_END = 0x800000
 CONFIG_SIZE = CONFIG_END - CONFIG_START
+
+USB_BACKUP_FORMAT = "cc2flash-backup-v2"
+USB_BACKUP_IMAGE_MEMBER = "flash.bin"
+USB_BACKUP_MANIFEST_MEMBER = "manifest.json"
+USB_BACKUP_MEMBERS = frozenset(
+    (USB_BACKUP_IMAGE_MEMBER, USB_BACKUP_MANIFEST_MEMBER)
+)
+MAX_USB_MANIFEST_SIZE = 1024 * 1024
+KNOWN_BOOTLOADER_SHA256 = (
+    "5602ec961b4410ccceea0d4910e4fa768c6998bd4ba86143ba50855bdd0b7a54"
+)
+EXPECTED_USB_PARTITIONS = (
+    (0, 0x040000, 0x8000, "boot"),
+    (1, 0x150000, 0x8000, "kernel"),
+    (2, 0x158000, 0x8000, "root"),
+    (3, 0x4E8000, 0x8000, "system"),
+    (4, 0x010000, 0x8000, "hwconfig"),
+    (5, 0x020000, 0x8000, "config"),
+)
 
 # The HWCONFIG record contains a unit-specific two-byte check value and a
 # 94-byte encrypted/encoded UOID. Everything around these two fields is
@@ -158,6 +179,158 @@ class ValidationError(RuntimeError):
 
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def image_hashes(data: bytes) -> dict[str, str | int]:
+    return {
+        "size": len(data),
+        "sha256": sha256(data),
+        "md5": hashlib.md5(data).hexdigest(),
+    }
+
+
+def _validate_usb_backup_manifest(manifest: Any, image: bytes) -> dict[str, Any]:
+    """Validate acquisition evidence produced by usb-maintenance/cc2flash."""
+
+    if not isinstance(manifest, dict):
+        raise ValidationError("USB backup manifest must be a JSON object")
+    if manifest.get("format") != USB_BACKUP_FORMAT:
+        raise ValidationError(
+            "USB backup requires a cc2flash-backup-v2 manifest with three "
+            "identical reads"
+        )
+
+    actual_hashes = image_hashes(image)
+    for key, expected in actual_hashes.items():
+        if manifest.get(key) != expected:
+            raise ValidationError(
+                f"USB backup manifest {key} does not match flash.bin"
+            )
+
+    boot_hash = sha256(image[:0x040000])
+    expected_bootloader = {
+        "partition": "boot",
+        "size": 0x040000,
+        "sha256": boot_hash,
+        "known_sha256": KNOWN_BOOTLOADER_SHA256,
+        "known_reference": boot_hash == KNOWN_BOOTLOADER_SHA256,
+    }
+    bootloader = manifest.get("bootloader")
+    if not isinstance(bootloader, dict):
+        raise ValidationError("USB backup manifest has no bootloader fingerprint")
+    for key, expected in expected_bootloader.items():
+        if bootloader.get(key) != expected:
+            raise ValidationError(
+                f"USB backup manifest bootloader {key} does not match flash.bin"
+            )
+    acceptance = bootloader.get("acceptance")
+    expected_acceptance = (
+        "known-reference"
+        if expected_bootloader["known_reference"]
+        else "explicit-hash"
+    )
+    if acceptance != expected_acceptance:
+        raise ValidationError(
+            "USB backup manifest does not contain the required bootloader "
+            "hash acceptance"
+        )
+
+    if manifest.get("required_identical_reads") != MIN_IDENTICAL_READS:
+        raise ValidationError("USB backup does not require three identical reads")
+    consecutive = manifest.get("consecutive_identical_reads")
+    if type(consecutive) is not int or consecutive != MIN_IDENTICAL_READS:
+        raise ValidationError(
+            "USB backup lacks three consecutive identical physical reads"
+        )
+    read_passes = manifest.get("read_passes")
+    if type(read_passes) is not int or not (
+        MIN_IDENTICAL_READS <= read_passes <= MAX_USB_READ_ATTEMPTS
+    ):
+        raise ValidationError("USB backup has an invalid physical-read count")
+    if manifest.get("maximum_read_attempts") != MAX_USB_READ_ATTEMPTS:
+        raise ValidationError("USB backup has an unexpected read-attempt policy")
+
+    partitions = manifest.get("partitions")
+    if not isinstance(partitions, list) or len(partitions) != len(
+        EXPECTED_USB_PARTITIONS
+    ):
+        raise ValidationError("USB backup manifest has an invalid partition map")
+    for item, (index, size, erase_size, name) in zip(
+        partitions, EXPECTED_USB_PARTITIONS
+    ):
+        if not isinstance(item, dict) or item != {
+            "index": index,
+            "size": size,
+            "erase_size": erase_size,
+            "name": name,
+        }:
+            raise ValidationError("USB backup manifest has an invalid partition map")
+
+    return {
+        "format": USB_BACKUP_FORMAT,
+        "image_member": USB_BACKUP_IMAGE_MEMBER,
+        "read_passes": read_passes,
+        "required_identical_reads": MIN_IDENTICAL_READS,
+        "consecutive_identical_reads": consecutive,
+        "maximum_read_attempts": MAX_USB_READ_ATTEMPTS,
+        "bootloader_acceptance": acceptance,
+        **actual_hashes,
+    }
+
+
+def read_image_source(path: Path) -> tuple[bytes, dict[str, Any]]:
+    """Read a raw dump or a strict cc2flash backup ZIP without extracting it."""
+
+    if path.suffix.casefold() != ".zip":
+        image = path.read_bytes()
+        return image, {
+            "format": "raw-flash-image",
+            "image_member": None,
+            "evidenced_identical_reads": 1,
+            **image_hashes(image),
+        }
+
+    try:
+        with zipfile.ZipFile(path, mode="r") as archive:
+            infos = archive.infolist()
+            names = [item.filename for item in infos]
+            if len(names) != 2 or set(names) != USB_BACKUP_MEMBERS:
+                raise ValidationError(
+                    "USB backup ZIP must contain exactly flash.bin and manifest.json"
+                )
+            by_name = {item.filename: item for item in infos}
+            if any(item.flag_bits & 0x1 for item in infos):
+                raise ValidationError("USB backup ZIP must not be encrypted")
+            if by_name[USB_BACKUP_IMAGE_MEMBER].file_size != FLASH_SIZE:
+                raise ValidationError("USB backup flash.bin is not exactly 8 MiB")
+            if (
+                by_name[USB_BACKUP_MANIFEST_MEMBER].file_size
+                > MAX_USB_MANIFEST_SIZE
+            ):
+                raise ValidationError("USB backup manifest is unexpectedly large")
+            image = archive.read(USB_BACKUP_IMAGE_MEMBER)
+            manifest_bytes = archive.read(USB_BACKUP_MANIFEST_MEMBER)
+    except ValidationError:
+        raise
+    except (
+        OSError,
+        RuntimeError,
+        NotImplementedError,
+        zipfile.BadZipFile,
+        zlib.error,
+        lzma.LZMAError,
+    ) as exc:
+        raise ValidationError("USB backup ZIP is unreadable or corrupt") from exc
+
+    if len(image) != FLASH_SIZE:
+        raise ValidationError("USB backup flash.bin is not exactly 8 MiB")
+    try:
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
+        raise ValidationError("USB backup manifest is unreadable") from exc
+    evidence = _validate_usb_backup_manifest(manifest, image)
+    evidence["evidenced_identical_reads"] = MIN_IDENTICAL_READS
+    return image, evidence
 
 
 def jffs2_crc(data: bytes) -> int:
@@ -651,7 +824,7 @@ def verify_confirmation_reads(
     primary_hash = sha256(primary)
 
     for path in confirmation_paths:
-        data = path.read_bytes()
+        data, source = read_image_source(path)
         if len(data) != len(primary):
             raise ValidationError(
                 f"Confirmation read {path} has {len(data)} bytes; "
@@ -671,6 +844,10 @@ def verify_confirmation_reads(
                 "size": len(data),
                 "sha256": primary_hash,
                 "byte_identical": True,
+                "source_format": source["format"],
+                "evidenced_identical_reads": source[
+                    "evidenced_identical_reads"
+                ],
             }
         )
 
@@ -924,11 +1101,18 @@ def build_recovery(
     allow_fewer_reads: bool,
 ) -> dict[str, Any]:
     confirmation_paths = tuple(confirmation_paths)
-    image = input_path.read_bytes()
+    image, input_source = read_image_source(input_path)
     confirmed_reads = verify_confirmation_reads(image, confirmation_paths)
-    analysis = analyze_image(image, str(input_path))
+    source_name = str(input_path)
+    if input_source["image_member"] is not None:
+        source_name += f"!{input_source['image_member']}"
+    analysis = analyze_image(image, source_name)
 
-    total_reads = 1 + len(confirmed_reads)
+    total_reads = max(
+        input_source["evidenced_identical_reads"],
+        1 + len(confirmed_reads),
+        *(item["evidenced_identical_reads"] for item in confirmed_reads),
+    )
     insufficient_reads = (
         total_reads < MIN_IDENTICAL_READS and analysis["exact_reference"] is None
     )
@@ -1056,8 +1240,23 @@ def build_recovery(
         },
         "input": {
             "filename": input_path.name,
+            "source_format": input_source["format"],
+            "image_member": input_source["image_member"],
             "size": len(image),
             "sha256": sha256(image),
+            "acquisition_evidence": {
+                key: value
+                for key, value in input_source.items()
+                if key
+                not in {
+                    "format",
+                    "image_member",
+                    "size",
+                    "sha256",
+                    "md5",
+                    "evidenced_identical_reads",
+                }
+            },
             "confirmed_reads": confirmed_reads,
             "total_identical_reads": total_reads,
             "fewer_reads_explicitly_allowed": (
@@ -1301,8 +1500,11 @@ def self_test(image_path: Path | None = None) -> None:
 
     image_result = "not requested"
     if image_path is not None:
-        image = image_path.read_bytes()
-        analysis = analyze_image(image, str(image_path))
+        image, source = read_image_source(image_path)
+        source_name = str(image_path)
+        if source["image_member"] is not None:
+            source_name += f"!{source['image_member']}"
+        analysis = analyze_image(image, source_name)
         if analysis["system_state"] == "stock-unpatched":
             patched = build_system_patch_window(image)
             if sha256(patched) != PATCHED_PATCH_SHA256:
@@ -1321,12 +1523,26 @@ def self_test(image_path: Path | None = None) -> None:
 
 def cmd_analyze(args: argparse.Namespace) -> None:
     path = Path(args.image)
-    image = path.read_bytes()
+    image, source = read_image_source(path)
     confirmations = verify_confirmation_reads(
         image, [Path(item) for item in args.confirm]
     )
-    print(format_analysis(analyze_image(image, str(path)), show_serial=args.show_serial))
-    print(f"Byte-identical physical reads supplied: {1 + len(confirmations)}")
+    source_name = str(path)
+    if source["image_member"] is not None:
+        source_name += f"!{source['image_member']}"
+    print(format_analysis(analyze_image(image, source_name), show_serial=args.show_serial))
+    evidenced_reads = max(
+        source["evidenced_identical_reads"],
+        1 + len(confirmations),
+        *(item["evidenced_identical_reads"] for item in confirmations),
+    )
+    print(f"Byte-identical physical reads evidenced: {evidenced_reads}")
+    if source["format"] == USB_BACKUP_FORMAT:
+        print(
+            "  USB backup: "
+            f"{source['consecutive_identical_reads']} consecutive identical "
+            f"reads in {source['read_passes']} attempt(s)"
+        )
     for item in confirmations:
         print(f"  {item['filename']}  {item['sha256']}")
 
@@ -1387,7 +1603,9 @@ def build_parser() -> argparse.ArgumentParser:
     analyze = subparsers.add_parser(
         "analyze", help="validate a dump without creating a recovery image"
     )
-    analyze.add_argument("image", help="primary 8 MiB SPI-NOR dump")
+    analyze.add_argument(
+        "image", help="primary raw 8 MiB dump or cc2flash backup ZIP"
+    )
     analyze.add_argument(
         "--confirm",
         nargs="*",
@@ -1405,7 +1623,9 @@ def build_parser() -> argparse.ArgumentParser:
     build = subparsers.add_parser(
         "build", help="validate a dump and generate a recovery bundle"
     )
-    build.add_argument("image", help="primary 8 MiB SPI-NOR dump")
+    build.add_argument(
+        "image", help="primary raw 8 MiB dump or cc2flash backup ZIP"
+    )
     build.add_argument(
         "--confirm",
         nargs="*",
@@ -1457,7 +1677,10 @@ def build_parser() -> argparse.ArgumentParser:
     test.add_argument(
         "image",
         nargs="?",
-        help="optional supported image for a complete system-patch self-test",
+        help=(
+            "optional supported raw image or cc2flash backup ZIP for a "
+            "complete system-patch self-test"
+        ),
     )
     test.set_defaults(func=cmd_self_test)
 
