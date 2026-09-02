@@ -20,6 +20,19 @@ When priorities conflict, use this order:
 
 Do not weaken validation, confirmation, backup, identity, or readback requirements merely to support another firmware dump or shorten a workflow.
 
+## Human decisions
+
+Product-level decisions are made by a human developer, not autonomously by an agent. These include decisions about:
+
+- supported users, devices, firmware, and workflows;
+- user-facing scope, behavior, defaults, and terminology;
+- CLI and public API contracts;
+- safety policy and accepted risk;
+- compatibility promises and file formats;
+- redistribution of sensitive or third-party material.
+
+Agents should identify these decisions, research the available options, and recommend a course of action during an interactive session. Explain the tradeoffs and wait for an explicit developer decision before implementing one of the options. An explicit task or accepted review suggestion counts as a developer decision; general permission to work on the project does not.
+
 ## User-facing content
 
 README files, CLI help, console output, and docstrings for shared or public APIs are user-facing. Write them for first-time visitors with no prior knowledge of the tools.
@@ -75,7 +88,7 @@ Preserve these properties in code, tests, documentation, and examples:
 - A read-only command must remain read-only. If a prerequisite requires mutation, expose it as a separate, explicit operation.
 - Never use another camera's dump as a generic recovery image. Preserve and validate the current camera's identity-bearing data.
 - Require trustworthy backups before destructive work.
-- Do not reduce the established stable-read requirement without documented evidence, an explicit risk decision, and regression tests.
+- Do not reduce the established stable-read requirement without documented evidence, an explicit risk decision made by a developer, not an agent, and regression tests.
 - Validate device identity, firmware invariants, flash size and layout, partition map, hashes, archive structure, and allowed change regions before a write.
 - Refuse ambiguous devices, unsupported firmware or layouts, wrong-unit data, unstable reads, malformed inputs, unexpected protocol states, timeouts, and verification mismatches.
 - Destructive operations require specific, informed consent. Consent for one operation must not imply consent for a separate mutation.
@@ -85,7 +98,7 @@ Preserve these properties in code, tests, documentation, and examples:
 - Do not add a generic force path around firmware, identity, layout, or write-region validation failures. A refusal is a safety feature.
 - Do not broaden supported firmware families, flash layouts, identities, commands, or writable regions without evidence and regression coverage.
 
-A narrow risk exception may be appropriate when the remaining risk is clearly explained, explicitly accepted, recorded in the result, and covered by tests. It must not bypass unrelated invariants.
+An agent may propose a narrow risk exception, but only a developer may approve it. The remaining risk must be clearly explained, explicitly accepted, recorded in the result, and covered by tests. The exception must not bypass unrelated invariants.
 
 Never describe static analysis, mocks, synthetic vectors, or offline tests as physical-hardware validation. State separately:
 
@@ -154,5 +167,6 @@ Before finishing a change, verify that:
 - claims match the available evidence and hardware-validation status;
 - tests cover the contract, including refusals and absence of side effects;
 - documentation describes the current state rather than the history of the change;
+- product-level and risk decisions were made explicitly by a developer;
 - no device dump, proprietary firmware material, or other unlicensed third-party material was committed;
 - no sensitive file was independently uploaded or attached.
