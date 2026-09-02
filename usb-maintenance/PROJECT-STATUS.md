@@ -24,6 +24,11 @@
 - Made `backup` strictly read-only. It requires three consecutive identical
   full reads within five attempts before evaluating a known boot-partition
   SHA-256 or an exact user-reviewed override.
+- Publishes `flash.bin` and `manifest.json` inside one verified ZIP through a
+  single same-directory rename; restore validates the archive directly.
+- Bounds every post-HID ADB probe by the remaining startup deadline, rejects
+  invalid durations before HID, and rejects malformed manifest field types as
+  ordinary protocol errors.
 - Replaced backup use of unsupported `adb exec-out` with legacy text `shell`
   plus binary-safe sync/`pull`. A live Windows pull of `/dev/mtd4` returned the
   exact expected 65,536 bytes and matched the camera-side MD5.
@@ -43,10 +48,11 @@
 
 ## Client status
 
-The included Python client is now v0.5.0 with 63 passing offline tests. Its
+The included Python client is now v0.5.0 with 69 passing offline tests. Its
 backup path is strictly read-only and requires three consecutive identical full
 reads within five attempts. Temporary and persistent ADB setup are separate
-commands rather than fallback flags on `backup`.
+commands rather than fallback flags on `backup`. An accepted backup is one ZIP
+archive, so the raw image cannot be published without its evidence manifest.
 The restore path now parses type-2 payloads as the next expected absolute packet
 and its two-packet mock proves the `ACK 0 → packet 0 → ACK 1 → final packet →
 type-5` sequence. It rejects a retransmission request with an explicit error;
@@ -55,7 +61,8 @@ hardware-unverified rather than known wire-incompatible.
 
 The expanded tests verify exact catalog completeness, all 21 configuration
 pairs, all 13 uploader commands, all four U-Boot frame types, group-wide
-`0x4xxx` behavior, builders/decoders, stable-read/hash gates, the exact
+`0x4xxx` behavior, builders/decoders, stable-read/hash/archive gates, bounded
+deadline propagation, malformed-manifest rejection, the exact
 `3000 → 3110 → 3200(final) → 3300` ADB-startup upload, interactive guards, and
 the temporary command-injection transaction and the prior backup/image safety
 checks.

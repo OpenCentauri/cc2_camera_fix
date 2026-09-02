@@ -14,10 +14,18 @@
 - Unknown boot partitions fail only after the three-read gate, print the exact
   observed hash, and require an exact reviewed
   `--accept-bootloader-hash <sha256>` override before any backup is published.
-- Added the `cc2flash-backup-v2` manifest with read-policy, boot-fingerprint,
-  and acceptance-basis fields; restore rejects legacy two-read manifests.
-- Expanded the offline suite from 54 to 63 tests, including stability ordering,
-  hash output/override behavior, read-only backup, and separate ADB commands.
+- Publishes the raw image and `cc2flash-backup-v2` manifest as the two members
+  of one ordinary ZIP. The completed archive is flushed, CRC-checked, and
+  exposed through one same-directory rename, eliminating the prior half-pair
+  publication window. Restore consumes the ZIP directly and rejects legacy
+  two-read manifests.
+- Makes the ADB startup deadline bound each `get-state` subprocess and rejects
+  zero, negative, infinite, and NaN durations before sending HID.
+- Type-checks untrusted manifest counters before comparison, so malformed JSON
+  is rejected as a protocol error instead of escaping as `TypeError`.
+- Expanded the offline suite from 54 to 69 tests, including stability ordering,
+  hash output/override behavior, atomic ZIP publication, malformed manifests,
+  bounded timeouts, read-only backup, and separate ADB commands.
 
 ## v0.6.0 — temporary ADB startup through upload command
 

@@ -119,7 +119,7 @@ Connect exactly one camera in normal USB mode, then:
 ```sh
 cc2flash list
 cc2flash info
-cc2flash backup backup.bin
+cc2flash backup backup.zip
 ```
 
 Without any setup and before `adbd` starts, the stock camera always exposes its
@@ -133,7 +133,7 @@ the installed daemon only for this boot, use the separate command:
 
 ```sh
 cc2flash start-adb
-cc2flash backup backup.bin
+cc2flash backup backup.zip
 ```
 
 This sends `0x3000`, the immutable no-space target
@@ -174,7 +174,7 @@ the literal confirmation `ENABLE-ADB`. It then sends:
 
 The command then exits with status `3`. It has not read flash or created a
 backup. Restart or power-cycle the camera, wait for normal USB mode, and run
-`cc2flash backup backup.bin`; `rcS` will start `adbd` during boot.
+`cc2flash backup backup.zip`; `rcS` will start `adbd` during boot.
 
 For a noninteractive invocation, the mutation must be requested explicitly:
 
@@ -215,18 +215,28 @@ prints the exact observed hash. After independently reviewing it, that one
 value can be accepted explicitly:
 
 ```sh
-cc2flash backup --accept-bootloader-hash <observed-sha256> backup.bin
+cc2flash backup --accept-bootloader-hash <observed-sha256> backup.zip
 ```
 
 The supplied value must exactly match the newly observed hash. Only then does
-the client publish `backup.bin` and its `cc2flash-backup-v2` JSON manifest,
-which records the acquisition counts, hashes, partition map, boot fingerprint,
-and acceptance basis. It refuses to overwrite an existing backup.
+the client publish `backup.zip`. The ordinary ZIP contains exactly:
+
+| Member | Purpose |
+|---|---|
+| `flash.bin` | accepted raw 8 MiB flash image |
+| `manifest.json` | `cc2flash-backup-v2` acquisition evidence |
+
+The manifest records the acquisition counts, hashes, partition map, boot
+fingerprint, and acceptance basis. Both members are completed and CRC-checked
+under a temporary name before one same-directory rename exposes the final ZIP,
+so an interruption cannot publish only the image or only its evidence. The
+client refuses to overwrite an existing archive. Standard ZIP tools can extract
+`flash.bin` for independent inspection.
 
 If ADB lists more than one device, pass the camera serial explicitly:
 
 ```sh
-cc2flash backup --serial Ucamera001 backup.bin
+cc2flash backup --serial Ucamera001 backup.zip
 ```
 
 The exact serial exposed by ADB may differ; use `cc2flash list` to inspect it.
@@ -250,13 +260,13 @@ aborts if U-Boot requests retransmission, which this research client does not ye
 implement:
 
 ```sh
-cc2flash restore fixed.bin --backup backup.bin
+cc2flash restore fixed.bin --backup backup.zip
 ```
 
 The command is intended to print the complete target range and hashes, then
 require the literal confirmation `RESTORE-CC2`. Its planned phases are:
 
-1. Validate `fixed.bin`, `backup.bin`, and `backup.bin.json` locally.
+1. Validate `fixed.bin` and both members of `backup.zip` locally.
 2. Send the 8-byte upgrade flag through normal Linux HID.
 3. Wait for bootloader HID `a108:ff08`.
 4. Transfer a 128-byte update header plus the image in numbered packets.
@@ -307,12 +317,13 @@ See [PROTOCOL.md](PROTOCOL.md) for the recovered wire formats and
 python -m unittest discover -s tests -v
 ```
 
-The 63 tests exercise the 57-entry normal command catalog, all configuration and
+The 69 tests exercise the 57-entry normal command catalog, all configuration and
 upload mappings, command builders, U-Boot frame types/ACK decoders, frame
 vectors, checksums, image headers, packet numbering, partition validation, ADB
 absence/offline/error classification, three-consecutive-of-five acquisition,
-boot-hash gating, v2 backup-manifest enforcement, both explicit ADB startup
-commands, expected final-commit failure/disconnection, the Windows `error: closed`
+boot-hash gating, atomic ZIP publication, strict v2 manifest parsing, both
+explicit ADB startup commands, bounded/validated timeouts, expected final-commit
+failure/disconnection, the Windows `error: closed`
 transport handoff, legacy text-shell parsing, ordered binary MTD pulls and
 temporary-file cleanup, CLI mutation guards, and the HID
 state machines without opening a device.

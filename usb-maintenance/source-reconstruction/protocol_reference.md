@@ -678,8 +678,10 @@ but also showed that the old ADB transport can close during the USB transition;
 in that case `adb wait-for-device` exits immediately with `error: closed`.
 The client therefore polls the selected device until it is online, tolerating
 only absent, stock `offline`, and exact `error: closed` transition states within
-the bounded startup timeout. It validates root ADB and exits; the user then
-runs the separate, strictly read-only `backup` command.
+the bounded startup timeout. Each `adb get-state` subprocess is capped at the
+remaining deadline; non-positive, infinite, and NaN durations are rejected
+before HID is sent. The command validates root ADB and exits; the user then runs
+the separate, strictly read-only `backup` command.
 
 No persistent startup file is created. The handler still executes `sync` after
 the shell command, so normal firmware writes already pending against JFFS2 may
@@ -723,6 +725,13 @@ backup and prints that exact observed value. The user may independently review
 it and rerun with `--accept-bootloader-hash <observed-sha256>`. A supplied hash
 that differs from the newly observed partition is rejected. The accepted v2
 manifest records whether the basis was `known-reference` or `explicit-hash`.
+The raw image and manifest are published as exactly two members of one ordinary
+ZIP, `flash.bin` and `manifest.json`. The client completes, flushes, and
+CRC-checks a same-directory temporary archive before one rename exposes the
+final `.zip`; it therefore cannot expose only one half of the image/evidence
+pair. Restore rejects additional/duplicate/encrypted members, the wrong
+advertised image size, oversized or non-object JSON, malformed counters, hash
+mismatches, and legacy manifest formats before enabling a write.
 
 The persistent startup hook is a solderless recovery path, but it is
 intentionally **not read-only**:
@@ -747,7 +756,7 @@ required before any mutation.
 | Bootloader data ACK | parses `u32le(next_expected_packet)` and requires the next in-order value; aborts on retry request | payload is the next expected packet, including a batch restart after an error | Wire-aligned for in-order packets; retransmission and hardware validation remain |
 | Persistent ADB start | separate guarded command installs `/etc/conf.d/system.sh`; backup remains read-only | `rcS` executes the persistent hook next boot | Implemented and offline-tested; manual hook behavior runtime-verified |
 | Temporary ADB start | separate command sends an immutable no-space upload target, tolerates only final-commit failure/disconnect, and polls across the old transport closing | unquoted `rm` target starts `/bin/adbd`; literal `fopen` then fails | Physical startup and root shell verified on Windows |
-| Backup acceptance | requires three consecutive identical full reads within five attempts, then gates on the known or explicitly accepted boot hash | ADB sync/`pull` can read each raw MTD device | Complete 8 MiB live acquisition verified; strengthened three-read policy is offline-tested |
+| Backup acceptance | requires three consecutive identical full reads within five attempts, gates on the known or explicitly accepted boot hash, and publishes one verified ZIP | ADB sync/`pull` can read each raw MTD device | Complete 8 MiB live acquisition verified; strengthened read/archive policy is offline-tested |
 | Public Python catalog | exposes all 57 exact normal commands, every `0x4xxx` match, and boot types 1/2/3/5 with builders/decoders | complete analyzed dispatcher/state-machine surface | Implemented with source comments and exhaustive offline mapping tests |
 
 The protocol builder, MD5 header, packet numbering, range checks, and
