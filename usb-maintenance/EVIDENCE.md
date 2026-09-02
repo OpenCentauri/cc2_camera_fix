@@ -1,4 +1,4 @@
-# Static-analysis evidence
+# Static-analysis and runtime evidence
 
 ## Inputs
 
@@ -108,8 +108,52 @@ are valid at that point. The device owner independently runtime-verified that
 manually creating this file starts ADB after restart. The normal-HID uploader's
 ability to select an arbitrary persistent path, append the 11 content bytes,
 remove/recreate the target, and chmod it `0777` is statically confirmed at the
-Linux updater anchors above. The combined client HID sequence remains
-runtime-unverified in this analysis.
+Linux updater anchors above. The persistent-file client HID sequence remains
+runtime-unverified in this analysis. The separate temporary command-injection
+sequence has since been verified on physical hardware as described below.
+
+## Live Windows ADB transport validation
+
+The device owner ran the client-generated temporary startup sequence against a
+physical camera on Windows 11 with Google ADB 35.0.2. The sequence started the
+stock daemon, changed `Ucamera001` from `offline` to `device`, and provided a
+root interactive shell. The old composite transport first returned
+`error: closed`, establishing the need for bounded state polling after HID.
+
+The same session compared the daemon's read services:
+
+| Probe | Result |
+|---|---|
+| `adb shell id` | success: `uid=0(root) gid=0(root)` |
+| `adb exec-out id` | failure: `error: closed` |
+| `adb shell cat /proc/mtd` | success; expected six-partition map, with doubled CR on Windows |
+| `adb pull /proc/mtd` | success: 227 bytes |
+| camera `md5sum /dev/mtd4` | `56392b3d32797a089432c7b633ef921f` |
+| `adb pull /dev/mtd4` | success: 65,536 bytes; local MD5 matched camera |
+
+The pulled `mtd4` SHA-256 was
+`ff1d60111d2517e1423a0b9c72b7b3c62e9388e54217929cbd33e2d16909958c`.
+This establishes ADB sync/`pull` as a byte-preserving Windows transport for a
+raw MTD character device on this firmware. A subsequent client invocation
+successfully acquired and published a complete 8 MiB image:
+
+| Property | Value |
+|---|---|
+| Full-image SHA-256 | `bccc6818a998d1c143c94543194e2d314cdee7a5f43b62db1fc6bb0b038c22a7` |
+| Full-image MD5 | `245763ac1fd9a6afdc79450886266a09` |
+| 256 KiB boot SHA-256 | `5602ec961b4410ccceea0d4910e4fa768c6998bd4ba86143ba50855bdd0b7a54` |
+
+Comparison with the supplied reference image showed byte identity for boot,
+kernel, root, system, and HWCONFIG; differences were confined to the live JFFS2
+config partition. The boot SHA-256 above is therefore the client's built-in
+known reference. The first same-boot acquisition attempt failed the then-current
+two-read equality gate, while the next invocation succeeded. This motivated the
+stronger policy of requiring three consecutive identical images while allowing
+at most five attempts for live state to settle.
+
+The stable-read gate precedes the boot-hash gate. An unknown boot hash is not
+reported or accepted from a lone read: it is exposed only after three
+consecutive full images agree, and it must then be accepted by exact value.
 
 ## Corrected bootloader ACK interpretation
 

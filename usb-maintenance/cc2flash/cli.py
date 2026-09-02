@@ -5,17 +5,18 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 import sys
-import time
 
 from . import __version__
 from .adb_backup import (
     AdbClient,
     AdbUnavailable,
-    acquire_twice,
+    acquire_stable,
     hashes,
     save_backup,
+    validate_backup_archive_path,
     validate_preserved_backup,
 )
 from .hid_transport import (
@@ -25,6 +26,7 @@ from .hid_transport import (
     expected_devices,
     install_adb_startup,
     restore_blob,
+    start_adb_through_upload_command,
     wait_for_hid,
 )
 from .protocol import (
@@ -41,6 +43,45 @@ from .protocol import (
 
 def _adb(args) -> AdbClient:
     return AdbClient(args.adb, args.serial)
+
+
+def _common_command(args, command: str) -> list[str]:
+    result = ["cc2flash", command]
+    if args.adb != "adb":
+        result += ["--adb", args.adb]
+    if args.serial:
+        result += ["--serial", args.serial]
+    return result
+
+
+def _read_progress(attempt, maximum, consecutive, required) -> None:
+    print(
+        f"Flash read {attempt}/{maximum} complete; "
+        f"consecutive identical: {consecutive}/{required}"
+    )
+
+
+def _sha256_argument(value: str) -> str:
+    normalized = value.casefold()
+    if len(normalized) != 64:
+        raise argparse.ArgumentTypeError("SHA-256 must contain exactly 64 hex digits")
+    try:
+        int(normalized, 16)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("SHA-256 must contain only hex digits") from exc
+    return normalized
+
+
+def _positive_finite_duration(value: str) -> float:
+    try:
+        duration = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("duration must be a number") from exc
+    if not math.isfinite(duration) or duration <= 0:
+        raise argparse.ArgumentTypeError(
+            "duration must be a finite positive number"
+        )
+    return duration
 
 
 def command_list(args) -> int:
@@ -82,25 +123,120 @@ def command_info(args) -> int:
 
 def command_backup(args) -> int:
     output = Path(args.output)
+    # Reject a non-atomic destination form before spending time on any physical
+    # reads. A single ZIP is the publication unit consumed by restore.
+    validate_backup_archive_path(output)
+    adb = _adb(args)
+
+    # Safety ordering is intentional and must not be reversed:
+    #
+    # 1. Read the complete six-partition image until three consecutive 8 MiB
+    #    results are identical (with five total attempts at most).
+    # 2. Fingerprint the boot partition from that stable image.
+    # 3. Require the built-in reference or an exact reviewed override.
+    # 4. Publish the image and manifest atomically.
+    #
+    # In particular, a hash from a lone or changing read is not useful as an
+    # acceptance token. acquire_stable() computes and returns the boot hash only
+    # after stability; every failure below happens before save_backup().
     try:
-        image, manifest = acquire_twice(_adb(args))
+        image, manifest = acquire_stable(adb, progress=_read_progress)
     except AdbUnavailable as exc:
-        return _bootstrap_adb_for_backup(args, exc)
-    manifest_path = save_backup(output, image, manifest)
-    print("Backup complete (two identical full reads)")
+        temporary = " ".join(_common_command(args, "start-adb"))
+        persistent = " ".join(_common_command(args, "install-adb-startup"))
+        raise ProtocolError(
+            f"{exc}\n"
+            "backup is strictly read-only and did not modify the camera.\n"
+            "Start ADB with one of these explicit commands, then rerun backup:\n"
+            f"  temporary for this boot: {temporary}\n"
+            f"  persistent after restart: {persistent}"
+        ) from exc
+
+    bootloader = manifest["bootloader"]
+    observed = str(bootloader["sha256"])
+    accepted = args.accept_bootloader_hash
+    if accepted is not None and accepted != observed:
+        raise ProtocolError(
+            "--accept-bootloader-hash does not match the observed boot partition: "
+            f"observed {observed}"
+        )
+    if bootloader["known_reference"]:
+        bootloader["acceptance"] = "known-reference"
+    elif accepted == observed:
+        bootloader["acceptance"] = "explicit-hash"
+    else:
+        rerun = _common_command(args, "backup")
+        rerun += ["--accept-bootloader-hash", observed, str(output)]
+        raise ProtocolError(
+            "unknown bootloader SHA-256; no backup was published:\n"
+            f"  {observed}\n"
+            "After independently reviewing that exact hash, accept it with:\n"
+            f"  {' '.join(rerun)}"
+        )
+
+    archive_path = save_backup(output, image, manifest)
+    print(
+        "Backup complete (three consecutive identical full reads; "
+        f"{manifest['read_passes']} total attempt(s))"
+    )
     print(f"Size:   {manifest['size']}")
     print(f"SHA256: {manifest['sha256']}")
     print(f"MD5:    {manifest['md5']}")
-    print(f"Saved:  {output}")
-    print(f"Manifest: {manifest_path}")
+    print(f"Boot:   {observed}")
+    print(
+        "Known bootloader: "
+        f"{'yes' if bootloader['known_reference'] else 'no (explicitly accepted)'}"
+    )
+    print(f"Saved archive: {archive_path}")
+    print("Archive members: flash.bin, manifest.json")
     return 0
 
 
-def _bootstrap_adb_for_backup(args, unavailable: AdbUnavailable) -> int:
-    """Offer the one-time persistent startup hook, then require a restart."""
+def command_start_adb(args) -> int:
+    """Start adbd for this boot through the immutable HID injection target."""
 
-    print(f"ADB is unavailable: {unavailable}", file=sys.stderr)
-    print("ADB startup recovery will modify the camera:", file=sys.stderr)
+    adb = _adb(args)
+    try:
+        adb.ensure_available()
+    except AdbUnavailable as unavailable:
+        print(f"ADB is unavailable: {unavailable}")
+    else:
+        identity, _parts = adb.identity_and_partitions()
+        print(f"ADB is already online; no HID command was sent. Identity: {identity}")
+        print("You can now run cc2flash backup <output.zip>.")
+        return 0
+
+    print(
+        "Starting /bin/adbd once through the normal-HID upload command. "
+        "No persistent startup file will be installed."
+    )
+    print(
+        "The final upload commit is expected to report failure or disconnect; "
+        "ADB availability is the success signal."
+    )
+    start_adb_through_upload_command()
+    adb.wait_for_device(timeout=args.timeout)
+    identity, _parts = adb.identity_and_partitions()
+    print(f"ADB started for this boot. Root identity: {identity}")
+    print("No flash backup was read and no persistent startup file was installed.")
+    print("Now run cc2flash backup <output.zip>.")
+    return 0
+
+
+def command_install_adb_startup(args) -> int:
+    """Install the persistent startup hook as a separate explicit operation."""
+
+    adb = _adb(args)
+    try:
+        adb.ensure_available()
+    except AdbUnavailable as unavailable:
+        print(f"ADB is unavailable: {unavailable}", file=sys.stderr)
+    else:
+        print("ADB is already online; no persistent startup file was installed.")
+        print("You can now run cc2flash backup <output.zip>.")
+        return 0
+
+    print("Persistent ADB installation will modify the camera:", file=sys.stderr)
     print(f"  overwrite {ADB_STARTUP_PATH}", file=sys.stderr)
     print(
         f"  with the exact {len(ADB_STARTUP_CONTENT)} bytes: "
@@ -109,11 +245,11 @@ def _bootstrap_adb_for_backup(args, unavailable: AdbUnavailable) -> int:
     )
     print("No flash backup can be read until after a manual restart.", file=sys.stderr)
 
-    if not args.bootstrap_adb:
+    if not args.yes:
         if not sys.stdin.isatty():
             raise ProtocolError(
-                "ADB startup recovery requires an interactive confirmation or "
-                "the explicit --bootstrap-adb option"
+                "persistent ADB installation requires an interactive confirmation "
+                "or the explicit --yes option"
             )
         phrase = input("Type ENABLE-ADB to overwrite the startup hook: ")
         if phrase != "ENABLE-ADB":
@@ -122,14 +258,8 @@ def _bootstrap_adb_for_backup(args, unavailable: AdbUnavailable) -> int:
     install_adb_startup()
     print(f"Installed ADB startup hook: {ADB_STARTUP_PATH}")
     print("No flash was read and no backup file was created.")
-    print("Restart or power-cycle the camera, wait for normal USB mode, then rerun:")
-    rerun = ["cc2flash", "backup"]
-    if args.adb != "adb":
-        rerun += ["--adb", args.adb]
-    if args.serial:
-        rerun += ["--serial", args.serial]
-    rerun.append(args.output)
-    print("  " + " ".join(rerun))
+    print("Restart or power-cycle the camera, wait for normal USB mode, then run:")
+    print("  " + " ".join(_common_command(args, "backup")) + " <output.zip>")
     return 3
 
 
@@ -199,22 +329,35 @@ def command_restore(args) -> int:
         print("Normal mode returned. Post-write readback was explicitly skipped.")
         return 0
 
-    print("Normal mode returned; reading flash twice for post-write verification.")
-    deadline = time.monotonic() + args.adb_timeout
-    while True:
-        try:
-            verified, _manifest = acquire_twice(_adb(args))
-            break
-        except ProtocolError:
-            if time.monotonic() >= deadline:
-                raise ProtocolError(
-                    "normal HID returned, but ADB readback did not become available; "
-                    "write is not post-verified"
-                )
-            time.sleep(1)
+    print(
+        "Normal mode returned; requiring three consecutive identical flash "
+        "reads for post-write verification."
+    )
+    adb = _adb(args)
+    try:
+        # --adb-timeout deliberately bounds only the transition to an online
+        # daemon. Stable acquisition is a separate operation: each pull keeps
+        # its normal command timeout and no completed read is discarded merely
+        # because the availability window expired while verification ran.
+        adb.wait_for_device(timeout=args.adb_timeout)
+    except ProtocolError as exc:
+        raise ProtocolError(
+            "normal HID returned, but ADB readback did not become available; "
+            "write is not post-verified"
+        ) from exc
+    try:
+        verified, _manifest = acquire_stable(adb, progress=_read_progress)
+    except ProtocolError as exc:
+        raise ProtocolError(
+            "ADB became available, but stable post-write readback failed; "
+            f"write is not post-verified: {exc}"
+        ) from exc
     if verified != image:
         raise ProtocolError("post-write flash readback differs from the replacement image")
-    print("Restore complete: two post-write reads exactly match the input image.")
+    print(
+        "Restore complete: three consecutive post-write reads exactly match "
+        "the input image."
+    )
     print(f"SHA256: {image_hashes['sha256']}")
     return 0
 
@@ -237,18 +380,51 @@ def parser() -> argparse.ArgumentParser:
     backup = commands.add_parser(
         "backup",
         parents=[common],
-        help="read flash twice; offer normal-HID ADB startup recovery if absent",
-    )
-    backup.add_argument("output")
-    backup.add_argument(
-        "--bootstrap-adb",
-        action="store_true",
         help=(
-            "if no ADB device is connected, overwrite /etc/conf.d/system.sh "
-            "with '/bin/adbd &' without an interactive prompt"
+            "require three consecutive identical flash reads within five attempts; "
+            "strictly read-only"
+        ),
+    )
+    backup.add_argument(
+        "output",
+        help="single ZIP archive to publish; must end in .zip",
+    )
+    backup.add_argument(
+        "--accept-bootloader-hash",
+        type=_sha256_argument,
+        help=(
+            "accept one reviewed unknown boot-partition SHA-256; the supplied "
+            "value must exactly match the observed hash"
         ),
     )
     backup.set_defaults(func=command_backup)
+
+    start_adb = commands.add_parser(
+        "start-adb",
+        parents=[common],
+        help=(
+            "start root ADB temporarily through normal HID; no persistent file"
+        ),
+    )
+    start_adb.add_argument(
+        "--timeout",
+        type=_positive_finite_duration,
+        default=30,
+        help="seconds to wait for ADB after temporary HID startup (default: 30)",
+    )
+    start_adb.set_defaults(func=command_start_adb)
+
+    install_adb = commands.add_parser(
+        "install-adb-startup",
+        parents=[common],
+        help="persistently install /etc/conf.d/system.sh; restart required",
+    )
+    install_adb.add_argument(
+        "--yes",
+        action="store_true",
+        help="skip typed ENABLE-ADB confirmation",
+    )
+    install_adb.set_defaults(func=command_install_adb_startup)
 
     plan = commands.add_parser("plan-restore", help="validate and describe an image; no USB writes")
     plan.add_argument("image")
@@ -256,12 +432,28 @@ def parser() -> argparse.ArgumentParser:
 
     restore = commands.add_parser("restore", parents=[common], help="restore one full 8 MiB image")
     restore.add_argument("image")
-    restore.add_argument("--backup", required=True, help="preserved backup with cc2flash manifest")
+    restore.add_argument(
+        "--backup",
+        required=True,
+        help="preserved cc2flash .zip archive",
+    )
     restore.add_argument("--yes", action="store_true", help="skip typed confirmation")
     restore.add_argument("--no-post-verify", action="store_true", help="skip normal-mode ADB readback")
-    restore.add_argument("--enumeration-timeout", type=float, default=30)
-    restore.add_argument("--reboot-timeout", type=float, default=180)
-    restore.add_argument("--adb-timeout", type=float, default=60)
+    restore.add_argument(
+        "--enumeration-timeout", type=_positive_finite_duration, default=30
+    )
+    restore.add_argument(
+        "--reboot-timeout", type=_positive_finite_duration, default=180
+    )
+    restore.add_argument(
+        "--adb-timeout",
+        type=_positive_finite_duration,
+        default=60,
+        help=(
+            "seconds to wait for ADB to become online before post-write "
+            "verification starts (default: 60; does not cap the reads)"
+        ),
+    )
     restore.set_defaults(func=command_restore)
     return result
 

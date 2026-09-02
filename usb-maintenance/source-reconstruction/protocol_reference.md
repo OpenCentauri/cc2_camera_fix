@@ -1,6 +1,6 @@
 # Elegoo Centauri Carbon 2 stock-camera interaction protocol
 
-**Firmware-specific reverse-engineering reference — 2026-08-31**
+**Firmware-specific reverse-engineering reference — 2026-09-01**
 
 This document describes every command branch found in the supplied CC2 camera's
 Linux maintenance daemon and U-Boot updater. It covers normal-mode USB HID,
@@ -11,10 +11,10 @@ the absence of any USB flash-read command.
 The catalog is complete for the two analyzed binaries. It is not a claim about
 other firmware revisions. All multibyte integers are little-endian unless noted.
 
-> **Destructive restore remains hardware-unverified.** Client v0.3.0 decodes
+> **Destructive restore remains hardware-unverified.** Client v0.5.0 decodes
 > bootloader ACKs as the next expected packet number and rejects unexpected or
-> retry requests; it does not yet retransmit. The guarded persistent ADB startup
-> write is implemented for backup. Both behaviors are detailed below.
+> retry requests; it does not yet retransmit. ADB startup is separated from the
+> strictly read-only backup command. Both behaviors are detailed below.
 
 ## 1. Evidence, scope, and confidence
 
@@ -620,15 +620,84 @@ exact contents are `/bin/adbd &` starts the daemon at the next boot. The device
 owner runtime-verified this by manual file creation. The boot hook and binary
 location are independently confirmed in the supplied image.
 
-The current client integrates that fact into `backup`. It first checks `adb get-state`.
-Only a genuinely absent selected device is eligible for fallback. A missing
-local ADB executable, timeout, multiple or unauthorized devices, a non-root
-shell, malformed partition map, failed/short read, or two-pass mismatch does
-not enter the startup writer.
+The client exposes the two startup mechanisms as separate `start-adb` and
+`install-adb-startup` commands. `backup` does not enter either path. Without any
+setup, the stock gadget always exposes an ADB USB transport without a running
+daemon, so the pre-daemon host state is `Ucamera001 offline`, not an absent
+device. The startup commands classify both that exact offline state and a
+genuinely absent selected device as eligible. A missing local ADB executable,
+timeout, multiple or unauthorized devices, a non-root shell, malformed
+partition map, failed/short read, or unstable acquisition remains a refusal.
 
-The fallback warns that it will overwrite an existing file, then requires either
-the interactive phrase `ENABLE-ADB` or the explicit noninteractive option
-`--bootstrap-adb`. It sends this normal-HID sequence:
+The stock daemon implements legacy ADB `shell` and sync/`pull`, but rejects the
+newer `exec-out` service with `error: closed`. The client therefore uses `shell`
+only for textual `id` and `/proc/mtd` results, removing the doubled carriage
+returns observed on Windows before parsing. It pulls each `/dev/mtdN` through
+ADB sync into a fresh private host file, requires the exact validated partition
+size, concatenates in MTD order, and deletes the temporary directory. It makes
+at most five complete attempts and accepts only three consecutive byte-identical
+8 MiB images. A nonconsecutive three-of-five majority is not accepted. It never
+sends binary flash data through the terminal-oriented shell service.
+
+This choice is runtime-grounded: on Windows 11 with ADB 35.0.2, a live
+`adb pull /dev/mtd4` returned exactly 65,536 bytes. Its local MD5
+`56392b3d32797a089432c7b633ef921f` matched `md5sum /dev/mtd4` on the camera.
+
+### 9.1 Temporary upload-command start
+
+`cc2flash start-adb` uses two confirmed bugs without weakening
+the general upload-path API:
+
+1. literal targets are truncated only at the first ASCII space; and
+2. commit interpolates the remaining host-controlled target into unquoted
+   `system("rm %s")` before calling `fopen(target, "wb")`.
+
+The client sends this exact sequence:
+
+| Step | Command | Frame details | Effect |
+|---:|---:|---|---|
+| 1 | `0x3000` | type `1`, empty payload | allocate/reset upload state |
+| 2 | `0x3110` | type `1`, payload `/tmp/.cc2flash-adbd-bootstrap;/bin/adbd&` | select immutable no-space injection target |
+| 3 | `0x3200` | type `2`, sequence `0`, payload one newline byte | mark upload final/ready |
+| 4 | `0x3300` | type `1`, empty payload | execute injected `rm` shell line, then reach expected failing literal open |
+
+At step 4 the first shell command is exactly:
+
+```sh
+rm /tmp/.cc2flash-adbd-bootstrap;/bin/adbd&
+```
+
+The `rm` side addresses tmpfs and `/bin/adbd` is launched once in the
+background. The subsequent literal path contains `/bin/adbd&` below a normally
+nonexistent `/tmp/.cc2flash-adbd-bootstrap;` directory, so `fopen` fails and the
+later unquoted `chmod` is not reached. This produces a normal status-1 commit
+reply; USB gadget changes may instead remove HID before the reply is readable.
+The client accepts failure/timeout/disconnection only for that final exchange.
+Live Windows testing confirmed that `/bin/adbd` starts and accepts `adb shell`,
+but also showed that the old ADB transport can close during the USB transition;
+in that case `adb wait-for-device` exits immediately with `error: closed`.
+The client therefore polls the selected device until it is online, tolerating
+only absent, stock `offline`, and exact `error: closed` transition states within
+the bounded startup timeout. Each `adb get-state` subprocess is capped at the
+remaining deadline; non-positive, infinite, and NaN durations are rejected
+before HID is sent. An ADB subprocess timeout is a hard failure rather than a
+fourth retryable transition state. The command validates root ADB and exits;
+the user then runs the separate, strictly read-only `backup` command.
+
+No persistent startup file is created. The handler still executes `sync` after
+the shell command, so normal firmware writes already pending against JFFS2 may
+be flushed; this mechanism specifically avoids adding the known
+`/etc/conf.d/system.sh` mutation rather than promising a quiescent flash.
+
+The uploader enters error state after the expected failed commit. If ADB does
+not appear, another attempt may require rebooting the camera to reset the
+uploader state.
+
+### 9.2 Persistent startup hook
+
+`cc2flash install-adb-startup` warns that it will overwrite an existing file,
+then requires either the interactive phrase `ENABLE-ADB` or its explicit
+noninteractive `--yes` option. It sends this normal-HID sequence:
 
 | Step | Command | Frame details | Effect |
 |---:|---:|---|---|
@@ -637,22 +706,53 @@ the interactive phrase `ENABLE-ADB` or the explicit noninteractive option
 | 3 | `0x3200` | type `2`, sequence `0`, payload `/bin/adbd &` | send the one final 11-byte packet |
 | 4 | `0x3300` | type `1`, empty payload | remove/recreate target and chmod `0777` |
 
-After four status-zero replies, `backup` exits with status `3`. It explicitly
-reports that no flash was read and no host backup file was created. The user
-must manually restart or power-cycle the camera and rerun `backup`. On that
-second run, the client requires a root identity, validates all six MTD names and
-sizes, concatenates two complete 8 MiB reads, requires byte identity, and only
-then publishes the image and JSON manifest.
+After four status-zero replies, `install-adb-startup` exits with status `3`. It
+explicitly reports that no flash was read and no host backup file was created.
+The user must manually restart or power-cycle the camera and run `backup`. That
+command requires a root identity, validates all six MTD names and sizes, and
+requires three consecutive identical complete reads within five attempts.
 
-This is a solderless recovery path, but it is intentionally **not read-only**:
+### 9.3 Stable-read and boot-hash gates
+
+Only after the three-read stability gate passes does `backup` fingerprint the
+full 256 KiB `boot` partition. The built-in known reference is:
+
+```text
+5602ec961b4410ccceea0d4910e4fa768c6998bd4ba86143ba50855bdd0b7a54
+```
+
+If the stable image has a different boot SHA-256, the command publishes no
+backup and prints that exact observed value. The user may independently review
+it and rerun with `--accept-bootloader-hash <observed-sha256>`. A supplied hash
+that differs from the newly observed partition is rejected. The accepted v2
+manifest records whether the basis was `known-reference` or `explicit-hash`.
+The raw image and manifest are published as exactly two members of one ordinary
+ZIP, `flash.bin` and `manifest.json`. The client completes, flushes, and
+CRC-checks a same-directory temporary archive before an atomic create-if-absent
+hard link exposes the final `.zip`. The publication step cannot overwrite a
+destination created concurrently, and it cannot expose only one half of the
+image/evidence pair. Restore rejects additional/duplicate/encrypted members,
+unsupported compression, the wrong advertised image size, oversized or
+non-object JSON, decoder-limit failures from overlong integers or excessive
+nesting, malformed or impossible counters, hash mismatches, and legacy manifest
+formats before enabling a write.
+
+After a restore returns to normal-mode USB, `--adb-timeout` bounds only the wait
+for the selected daemon to become online. The three-consecutive-read verification
+then runs as a separate phase with the normal per-command timeouts. This avoids
+misrepresenting a short ADB-availability window as a bound on as many as thirty
+partition pulls.
+
+The persistent startup hook is a solderless recovery path, but it is
+intentionally **not read-only**:
 
 - `0x3300` removes any previous `/etc/conf.d/system.sh`, so the old file cannot
   be preserved through this protocol;
 - normal HID provides no file download or content verification;
 - the success response establishes only that the daemon-side write path returned
   success; and
-- the client-generated four-command transaction has offline tests but no
-  physical USB capture in this work.
+- the client-generated four-command persistent transaction has offline tests
+  but no physical USB capture in this work.
 
 The later root ADB partition reads provide flash readback, but they do not recover
 the previous contents of `system.sh` after it has been overwritten. Direct SPI
@@ -664,7 +764,9 @@ required before any mutation.
 | Component | Current client behavior | Firmware behavior | Status |
 |---|---|---|---|
 | Bootloader data ACK | parses `u32le(next_expected_packet)` and requires the next in-order value; aborts on retry request | payload is the next expected packet, including a batch restart after an error | Wire-aligned for in-order packets; retransmission and hardware validation remain |
-| Backup startup | installs `/etc/conf.d/system.sh` through guarded normal HID when ADB is absent | `rcS` executes the persistent hook next boot | Implemented and offline-tested; manual hook behavior runtime-verified |
+| Persistent ADB start | separate guarded command installs `/etc/conf.d/system.sh`; backup remains read-only | `rcS` executes the persistent hook next boot | Implemented and offline-tested; manual hook behavior runtime-verified |
+| Temporary ADB start | separate command sends an immutable no-space upload target, tolerates only final-commit failure/disconnect, and polls across the old transport closing | unquoted `rm` target starts `/bin/adbd`; literal `fopen` then fails | Physical startup and root shell verified on Windows |
+| Backup acceptance | requires three consecutive identical full reads within five attempts, gates on the known or explicitly accepted boot hash, and publishes one verified ZIP | ADB sync/`pull` can read each raw MTD device | Complete 8 MiB live acquisition verified; strengthened read/archive policy is offline-tested |
 | Public Python catalog | exposes all 57 exact normal commands, every `0x4xxx` match, and boot types 1/2/3/5 with builders/decoders | complete analyzed dispatcher/state-machine surface | Implemented with source comments and exhaustive offline mapping tests |
 
 The protocol builder, MD5 header, packet numbering, range checks, and
@@ -709,7 +811,7 @@ The following remain hardware-unverified or unknown:
 - normal and bootloader endpoint numbers assigned at runtime;
 - the bootloader CDC PID and exact serial endpoint configuration;
 - host HID API differences involving report-ID prefixes;
-- physical validation of the client-generated ADB-startup upload sequence;
+- physical validation of the strengthened three-consecutive-read acquisition;
 - physical timeout/retry timing and reboot duration;
 - erase/write behavior and failure reporting on the installed NOR chip;
 - whether other CC2 camera firmware revisions use the same commands; and

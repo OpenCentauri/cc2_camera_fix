@@ -36,6 +36,7 @@ from .protocol import (
 
 
 __all__ = [
+    "ADB_UPLOAD_COMMAND_TARGET",
     "BOOT_FRAME_TYPES",
     "CONFIGURATION_BY_KEY",
     "CONFIGURATION_COMMANDS",
@@ -59,6 +60,7 @@ __all__ = [
     "UploadState",
     "build_boot_data_request",
     "build_boot_metadata_request",
+    "build_adb_upload_command_target_request",
     "build_config_get_request",
     "build_config_set_request",
     "build_upgrade_request",
@@ -713,6 +715,54 @@ def build_config_set_request(
 
 
 _SAFE_UPLOAD_PATH = re.compile(rb"\A[A-Za-z0-9_./-]+\Z")
+
+
+# ---------------------------------------------------------------------------
+# Deliberately narrow recovery use of the vendor's shell-injection bug
+# ---------------------------------------------------------------------------
+#
+# Binary anchors:
+#   target parsing  0x00402e3c
+#   upload commit   0x004029f0
+#
+# The generic build_upload_target_request() below intentionally rejects shell
+# metacharacters.  Weakening that validation would turn every caller into a
+# potential command-injection producer.  This one immutable target is exposed
+# separately because it is useful for a specific, audited recovery operation:
+# start the stock /bin/adbd once without creating a persistent startup file.
+#
+# The target contains no literal spaces because hid_update truncates the target
+# at the first ASCII space.  On 0x3300, its unquoted `system("rm %s")` becomes:
+#
+#   rm /tmp/.cc2flash-adbd-bootstrap;/bin/adbd&
+#
+# The following fopen() receives the *literal* full target.  Its embedded
+# `/bin/...` makes `/tmp/.cc2flash-adbd-bootstrap;` an intermediate directory;
+# that directory does not exist on the stock tmpfs, so fopen fails after adbd
+# has already been launched.  This expected commit failure also prevents the
+# later unquoted chmod command from launching adbd a second time.
+#
+# This is firmware-specific behavior, not a general shell-command API.  Keep
+# the value constant, below the daemon's 128-byte target buffer, and free of
+# literal whitespace.
+ADB_UPLOAD_COMMAND_TARGET = b"/tmp/.cc2flash-adbd-bootstrap;/bin/adbd&"
+
+
+def build_adb_upload_command_target_request() -> bytes:
+    """Build the one audited 0x3110 target that starts stock ``/bin/adbd``.
+
+    Building the report performs no I/O.  Sending it as part of an upload
+    transaction deliberately relies on the analyzed daemon's unquoted shell
+    command.  Callers must expect the later 0x3300 commit to fail or disconnect
+    after the process has been started.
+    """
+
+    assert b" " not in ADB_UPLOAD_COMMAND_TARGET
+    assert 0 < len(ADB_UPLOAD_COMMAND_TARGET) <= 127
+    return build_normal_report(
+        NormalCommand.UPLOAD_TARGET_3110,
+        ADB_UPLOAD_COMMAND_TARGET,
+    )
 
 
 def build_upload_initialize_request() -> bytes:
