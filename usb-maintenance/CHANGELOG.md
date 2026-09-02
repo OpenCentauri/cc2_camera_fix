@@ -27,12 +27,14 @@
   clean protocol errors.
 - Rejects damaged DEFLATE/LZMA member streams as clean protocol errors instead
   of allowing decompressor exceptions to escape with a traceback.
+- Rejects overlong JSON integers and excessive manifest nesting as clean
+  protocol errors instead of allowing decoder exceptions to escape.
 - Treats an ADB subprocess timeout as an immediate hard failure, keeping the
   startup poll's retry set limited to absent, stock `offline`, and exact
   `error: closed` transition states.
 - Defines restore `--adb-timeout` as the bounded online-availability wait; the
   stable readback then runs as a separate operation under per-command timeouts.
-- Expanded the offline suite from 54 to 76 tests, including stability ordering,
+- Expanded the offline suite from 54 to 78 tests, including stability ordering,
   hash output/override behavior, create-if-absent ZIP publication, malformed
   manifests, bounded availability timeouts, read-only backup, and separate ADB
   commands.

@@ -322,11 +322,12 @@ See [PROTOCOL.md](PROTOCOL.md) for the recovered wire formats and
 python -m unittest discover -s tests -v
 ```
 
-The 76 tests exercise the 57-entry normal command catalog, all configuration and
+The 78 tests exercise the 57-entry normal command catalog, all configuration and
 upload mappings, command builders, U-Boot frame types/ACK decoders, frame
 vectors, checksums, image headers, packet numbering, partition validation, ADB
 absence/offline/error classification, three-consecutive-of-five acquisition,
-boot-hash gating, create-if-absent ZIP publication, strict v2 manifest parsing,
+boot-hash gating, create-if-absent ZIP publication, strict v2 manifest parsing
+including JSON decoder-limit failures,
 unsupported-compression rejection, both explicit ADB startup commands,
 bounded/validated availability timeouts, expected final-commit
 failure/disconnection, the Windows `error: closed`

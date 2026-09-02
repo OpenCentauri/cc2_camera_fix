@@ -733,8 +733,9 @@ hard link exposes the final `.zip`. The publication step cannot overwrite a
 destination created concurrently, and it cannot expose only one half of the
 image/evidence pair. Restore rejects additional/duplicate/encrypted members,
 unsupported compression, the wrong advertised image size, oversized or
-non-object JSON, malformed or impossible counters, hash mismatches, and legacy
-manifest formats before enabling a write.
+non-object JSON, decoder-limit failures from overlong integers or excessive
+nesting, malformed or impossible counters, hash mismatches, and legacy manifest
+formats before enabling a write.
 
 After a restore returns to normal-mode USB, `--adb-timeout` bounds only the wait
 for the selected daemon to become online. The three-consecutive-read verification
