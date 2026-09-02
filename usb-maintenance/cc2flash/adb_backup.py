@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
+import lzma
 import math
 import os
 from pathlib import Path
@@ -14,6 +15,7 @@ import subprocess
 import tempfile
 import time
 import zipfile
+import zlib
 from typing import Callable
 
 from .protocol import FLASH_SIZE, ProtocolError
@@ -220,10 +222,7 @@ class AdbClient:
                 # explicit HID action could trigger an unnecessary device
                 # mutation.  It is transient only here, after that action.
                 detail = str(exc).casefold()
-                if not (
-                    "adb device is not usable (error: closed)" in detail
-                    or "adb availability check timed out" in detail
-                ):
+                if "adb device is not usable (error: closed)" not in detail:
                     raise
                 last_state = str(exc)
 
@@ -521,7 +520,14 @@ def validate_preserved_backup(path: Path) -> dict[str, str | int]:
             manifest_bytes = archive.read(BACKUP_MANIFEST_MEMBER)
     except ProtocolError:
         raise
-    except (OSError, RuntimeError, NotImplementedError, zipfile.BadZipFile) as exc:
+    except (
+        OSError,
+        RuntimeError,
+        NotImplementedError,
+        zipfile.BadZipFile,
+        zlib.error,
+        lzma.LZMAError,
+    ) as exc:
         raise ProtocolError("preserved backup ZIP is unreadable or corrupt") from exc
 
     if len(data) != FLASH_SIZE:

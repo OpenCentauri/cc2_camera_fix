@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
+import lzma
 from pathlib import Path
 import struct
 import sys
@@ -409,6 +411,43 @@ class BackupTests(unittest.TestCase):
             ):
                 validate_preserved_backup(path)
 
+    def test_corrupt_compressed_zip_member_is_rejected_cleanly(self):
+        image = b"\0" * FLASH_SIZE
+        manifest = {"format": "test", **hashes(image)}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "backup.zip"
+            with zipfile.ZipFile(
+                path, mode="w", compression=zipfile.ZIP_DEFLATED
+            ) as archive:
+                archive.writestr(BACKUP_IMAGE_MEMBER, image)
+                archive.writestr(BACKUP_MANIFEST_MEMBER, json.dumps(manifest))
+
+            damaged = bytearray(path.read_bytes())
+            with zipfile.ZipFile(io.BytesIO(damaged)) as archive:
+                info = archive.getinfo(BACKUP_IMAGE_MEMBER)
+                header_size = 30 + len(info.filename.encode()) + len(info.extra)
+                compressed_start = info.header_offset + header_size
+            damaged[compressed_start] = 0x06  # reserved DEFLATE block type
+            path.write_bytes(damaged)
+
+            with self.assertRaisesRegex(ProtocolError, "unreadable or corrupt"):
+                validate_preserved_backup(path)
+
+    def test_lzma_corruption_is_rejected_cleanly(self):
+        image = b"\0" * FLASH_SIZE
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "backup.zip"
+            save_backup(path, image, {"format": "test", **hashes(image)})
+            with (
+                mock.patch.object(
+                    zipfile.ZipFile,
+                    "read",
+                    side_effect=lzma.LZMAError("damaged LZMA stream"),
+                ),
+                self.assertRaisesRegex(ProtocolError, "unreadable or corrupt"),
+            ):
+                validate_preserved_backup(path)
+
     def test_adb_absence_is_distinguished_for_bootstrap(self):
         result = SimpleNamespace(
             returncode=1,
@@ -538,6 +577,21 @@ class BackupTests(unittest.TestCase):
         check.assert_called_once()
         self.assertGreater(check.call_args.kwargs["timeout"], 0)
         self.assertLessEqual(check.call_args.kwargs["timeout"], 30)
+        sleep.assert_not_called()
+
+    def test_wait_for_device_does_not_retry_adb_subprocess_timeout(self):
+        client = AdbClient()
+        with (
+            mock.patch.object(
+                client,
+                "ensure_available",
+                side_effect=ProtocolError("ADB availability check timed out: adb get-state"),
+            ) as check,
+            mock.patch("cc2flash.adb_backup.time.sleep") as sleep,
+            self.assertRaisesRegex(ProtocolError, "availability check timed out"),
+        ):
+            client.wait_for_device(timeout=30)
+        check.assert_called_once()
         sleep.assert_not_called()
 
     def test_wait_for_device_caps_get_state_at_remaining_deadline(self):
