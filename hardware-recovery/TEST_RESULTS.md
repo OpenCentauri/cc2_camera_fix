@@ -1,10 +1,51 @@
 # Validation and regression test results
 
-Tool version: `1.1.0`
+Tool version: `1.2.0`
 
-Review date: 2026-08-22
+Review date: 2026-09-02
 
-## Directly re-executed full-ROM tests
+## USB-backup interoperability regression tests
+
+- A strict `cc2flash-backup-v2` ZIP with exactly `flash.bin` and
+  `manifest.json` is accepted without extraction.
+- Image size, SHA-256, MD5, boot fingerprint and acceptance basis, exact MTD
+  partition map, and three-consecutive-of-five acquisition policy are checked
+  before the flash image reaches the firmware validator.
+- A manifest/image hash mismatch and any extra ZIP member are rejected.
+- The validated manifest contributes exactly three evidenced physical reads,
+  satisfying the ordinary non-reference build gate without
+  `--allow-fewer-reads`.
+- The hardware-recovery self-test and all nine focused
+  interoperability/config-mode tests pass on Python 3.12.
+- Oversized zero-filled fragments are rejected before allocation. Zlib
+  fragments are rejected before decompression when their declared size exceeds
+  the config partition, and decompression output is bounded when the stream
+  expands beyond its declared size.
+
+## Attached current USB-backup interoperability
+
+The locally supplied current-format ZIP was used only as a test input and was
+not added to the repository. Its manifest records three consecutive identical
+reads, the known bootloader fingerprint, and the camera's six-partition map.
+
+- The unmodified ZIP passed strict archive, evidence, partition-map, firmware,
+  identity, and JFFS2 validation without reduced-read overrides.
+- Default clean-data correctly refused the live unfamiliar `system.sh` name.
+- Clean-data with `--wipe-unknown-config` and preserve-data both built directly
+  from the ZIP without extraction.
+- Preserve-data retained the contents and relevant metadata of all seven live
+  regular files: `dev_config.cfg`, `serial.cfg`, `system.sh`, `uvc.attr`,
+  `uvc.config`, `uvc2.attr`, and `uvc_dualstream.config`.
+- The preserved config contains one cleanmarker, one dirent and one inode per
+  file, and zero obsolete nodes.
+- Both generated full images passed USB maintenance's image safety checks and
+  same-camera allowed-region comparison against `flash.bin` from the ZIP.
+
+The table below retains the earlier two-unit regression record. Unit B's clean
+output/readback equality was re-executed with the newly attached files; unit A
+was not present in this interoperability run.
+
+## Full-ROM regression record
 
 | Input | Unit identity | Input SHA-256 | Config state | Generated SHA-256 | Result |
 |---|---|---|---|---|---|
@@ -13,7 +54,8 @@ Review date: 2026-08-22
 
 Both inputs have the same exact invariant firmware fingerprint and stock SquashFS window, but different serials, UOIDs, two-byte HWCONFIG check values, and raw JFFS2 histories. Each output preserves its own complete HWCONFIG partition and exact recovered `serial.cfg` payload.
 
-The unit-B generated image is byte-for-byte equal to the permanent hardware-readback SHA-256 recorded in the earlier results. The corresponding raw readback was not included in this review, so its bytes could not be independently re-read here.
+The attached unit-B hardware readback was independently hashed and compared
+byte-for-byte with the newly generated clean-data image in this review.
 
 ## Independent filesystem and patch checks
 

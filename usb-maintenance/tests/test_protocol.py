@@ -26,11 +26,14 @@ from cc2flash.adb_backup import (
     acquire_stable,
     bootloader_reference,
     hashes,
+    load_preserved_backup,
     parse_proc_mtd,
     save_backup,
     validate_backup_archive_path,
     validate_partition_map,
+    validate_post_restore_readback,
     validate_preserved_backup,
+    validate_replacement_against_backup,
 )
 from cc2flash import cli
 from cc2flash import hid_transport
@@ -153,12 +156,12 @@ class ProtocolTests(unittest.TestCase):
 
 
 PROC_MTD = """dev:    size   erasesize  name
-mtd0: 00040000 00008000 "boot"
-mtd1: 00150000 00008000 "kernel"
-mtd2: 00158000 00008000 "root"
-mtd3: 004e8000 00008000 "system"
-mtd4: 00010000 00008000 "hwconfig"
-mtd5: 00020000 00008000 "config"
+mtd0: 00040000 00004000 "boot"
+mtd1: 00150000 00004000 "kernel"
+mtd2: 00158000 00004000 "root"
+mtd3: 004e8000 00004000 "system"
+mtd4: 00010000 00004000 "hwconfig"
+mtd5: 00020000 00004000 "config"
 """
 
 
@@ -219,6 +222,34 @@ class BackupTests(unittest.TestCase):
     def test_backup_requires_zip_destination(self):
         with self.assertRaisesRegex(ProtocolError, "must be a .zip"):
             validate_backup_archive_path(Path("backup.bin"))
+
+    def test_hardware_recovery_regions_are_restore_compatible(self):
+        preserved = b"\0" * FLASH_SIZE
+        replacement = bytearray(preserved)
+        replacement[0x463000] ^= 0xFF
+        replacement[0x46AFFF] ^= 0xFF
+        replacement[0x7E0000] ^= 0xFF
+        replacement[0x7FFFFF] ^= 0xFF
+        validate_replacement_against_backup(bytes(replacement), preserved)
+
+    def test_restore_rejects_difference_outside_recovery_regions(self):
+        preserved = b"\0" * FLASH_SIZE
+        replacement = bytearray(preserved)
+        replacement[0x7D2011] = 1
+        with self.assertRaisesRegex(ProtocolError, "0x7d2011.*wrong-unit"):
+            validate_replacement_against_backup(bytes(replacement), preserved)
+
+    def test_post_restore_allows_only_live_config_changes(self):
+        expected = b"\0" * FLASH_SIZE
+        actual = bytearray(expected)
+        actual[0x7E0000] = 1
+        self.assertFalse(
+            validate_post_restore_readback(expected, bytes(actual))
+        )
+        self.assertTrue(validate_post_restore_readback(expected, expected))
+        actual[0x7DFFFF] = 1
+        with self.assertRaisesRegex(ProtocolError, "0x7dffff"):
+            validate_post_restore_readback(expected, bytes(actual))
 
     def test_failed_archive_publish_leaves_no_final_or_half_backup(self):
         image = b"\0" * FLASH_SIZE
@@ -324,20 +355,6 @@ class BackupTests(unittest.TestCase):
             expected_observed == KNOWN_BOOTLOADER_SHA256,
         )
 
-    def test_restore_rejects_legacy_two_read_manifest(self):
-        image = b"\0" * FLASH_SIZE
-        manifest = {
-            "format": "cc2flash-backup-v1",
-            **hashes(image),
-            "read_passes": 2,
-            "partitions": [],
-        }
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "backup.zip"
-            save_backup(path, image, manifest)
-            with self.assertRaisesRegex(ProtocolError, "v2 manifest"):
-                validate_preserved_backup(path)
-
     def test_malformed_consecutive_read_count_is_rejected_cleanly(self):
         image = b"\0" * FLASH_SIZE
         manifest = {
@@ -355,7 +372,7 @@ class BackupTests(unittest.TestCase):
                 {
                     "index": index,
                     "size": size,
-                    "erase_size": 0x8000,
+                    "erase_size": 0x4000,
                     "name": name,
                 }
                 for index, (name, size) in enumerate(EXPECTED_PARTITIONS)
@@ -384,7 +401,7 @@ class BackupTests(unittest.TestCase):
                 {
                     "index": index,
                     "size": size,
-                    "erase_size": 0x8000,
+                    "erase_size": 0x4000,
                     "name": name,
                 }
                 for index, (name, size) in enumerate(EXPECTED_PARTITIONS)
@@ -903,6 +920,78 @@ class CliAdbWorkflowTests(unittest.TestCase):
         self.assertIn("cc2flash start-adb", error)
         self.assertIn("cc2flash install-adb-startup", error)
 
+    def test_plan_restore_can_prove_preserved_backup_compatibility(self):
+        image = b"replacement image"
+        plan = SimpleNamespace(
+            flash_offset=0,
+            transfer_size=len(image),
+            packet_count=1,
+            packet_payload_size=1024,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            image_path = Path(directory) / "replacement.bin"
+            image_path.write_bytes(image)
+            args = SimpleNamespace(
+                image=str(image_path),
+                backup="backup.zip",
+            )
+            output = io.StringIO()
+            with (
+                mock.patch.object(cli, "validate_full_restore_image"),
+                mock.patch.object(
+                    cli,
+                    "load_preserved_backup",
+                    return_value=(image, {"sha256": "preserved-hash"}),
+                ),
+                mock.patch.object(
+                    cli, "validate_replacement_against_backup"
+                ) as compatible,
+                mock.patch.object(
+                    cli, "build_update_blob", return_value=(b"blob", plan)
+                ),
+                redirect_stdout(output),
+            ):
+                status = cli.command_plan(args)
+        self.assertEqual(status, 0)
+        compatible.assert_called_once_with(image, image)
+        result = json.loads(output.getvalue())
+        self.assertTrue(result["preserved_backup_compatible"])
+        self.assertEqual(result["preserved_backup_sha256"], "preserved-hash")
+
+    def test_restore_refuses_wrong_unit_before_opening_usb(self):
+        image = b"replacement image"
+        with tempfile.TemporaryDirectory() as directory:
+            image_path = Path(directory) / "replacement.bin"
+            image_path.write_bytes(image)
+            args = SimpleNamespace(
+                image=str(image_path),
+                backup="backup.zip",
+                yes=True,
+                enumeration_timeout=30,
+                reboot_timeout=180,
+                no_post_verify=True,
+                adb_timeout=60,
+                adb="adb",
+                serial=None,
+            )
+            with (
+                mock.patch.object(
+                    cli,
+                    "load_preserved_backup",
+                    return_value=(b"preserved image", {"sha256": "preserved-hash"}),
+                ),
+                mock.patch.object(cli, "validate_full_restore_image"),
+                mock.patch.object(
+                    cli,
+                    "validate_replacement_against_backup",
+                    side_effect=ProtocolError("wrong-unit image"),
+                ),
+                mock.patch.object(cli, "enter_bootloader") as enter,
+                self.assertRaisesRegex(ProtocolError, "wrong-unit"),
+            ):
+                cli.command_restore(args)
+        enter.assert_not_called()
+
     def test_backup_rejects_non_zip_output_before_camera_read(self):
         with (
             mock.patch.object(cli, "acquire_stable") as acquire,
@@ -1113,7 +1202,7 @@ class CliAdbWorkflowTests(unittest.TestCase):
         save.assert_not_called()
         self.assertIn(observed, stderr.getvalue())
 
-    def test_restore_adb_timeout_only_bounds_availability_wait(self):
+    def test_restore_online_probe_uses_availability_timeout(self):
         image = b"replacement image"
         fake_adb = mock.Mock()
         plan = mock.sentinel.plan
@@ -1134,10 +1223,11 @@ class CliAdbWorkflowTests(unittest.TestCase):
             with (
                 mock.patch.object(
                     cli,
-                    "validate_preserved_backup",
-                    return_value={"sha256": "different"},
+                    "load_preserved_backup",
+                    return_value=(image, {"sha256": "different"}),
                 ),
                 mock.patch.object(cli, "validate_full_restore_image"),
+                mock.patch.object(cli, "validate_replacement_against_backup"),
                 mock.patch.object(
                     cli, "build_update_blob", return_value=(b"blob", plan)
                 ),
@@ -1148,12 +1238,181 @@ class CliAdbWorkflowTests(unittest.TestCase):
                 mock.patch.object(
                     cli, "acquire_stable", return_value=(image, {})
                 ) as acquire,
+                mock.patch.object(
+                    cli, "validate_post_restore_readback", return_value=True
+                ) as validate_readback,
                 redirect_stdout(io.StringIO()),
             ):
                 status = cli.command_restore(args)
         self.assertEqual(status, 0)
-        fake_adb.wait_for_device.assert_called_once_with(timeout=7)
+        fake_adb.ensure_available.assert_called_once()
+        self.assertGreater(fake_adb.ensure_available.call_args.kwargs["timeout"], 0)
+        self.assertLessEqual(fake_adb.ensure_available.call_args.kwargs["timeout"], 7)
+        fake_adb.wait_for_device.assert_not_called()
         acquire.assert_called_once_with(fake_adb, progress=cli._read_progress)
+        validate_readback.assert_called_once_with(image, image)
+
+    def test_restore_prompts_before_temporary_adb_start(self):
+        image = b"replacement image"
+        fake_adb = mock.Mock()
+        fake_adb.ensure_available.side_effect = AdbUnavailable("device offline")
+        plan = mock.sentinel.plan
+        with tempfile.TemporaryDirectory() as directory:
+            image_path = Path(directory) / "replacement.bin"
+            image_path.write_bytes(image)
+            args = SimpleNamespace(
+                image=str(image_path),
+                backup="backup.zip",
+                yes=True,
+                enumeration_timeout=30,
+                reboot_timeout=180,
+                no_post_verify=False,
+                adb_timeout=7,
+                adb="adb",
+                serial=None,
+            )
+            with (
+                mock.patch.object(
+                    cli,
+                    "load_preserved_backup",
+                    return_value=(image, {"sha256": "different"}),
+                ),
+                mock.patch.object(cli, "validate_full_restore_image"),
+                mock.patch.object(cli, "validate_replacement_against_backup"),
+                mock.patch.object(
+                    cli, "build_update_blob", return_value=(b"blob", plan)
+                ),
+                mock.patch.object(cli, "enter_bootloader"),
+                mock.patch.object(cli, "wait_for_hid"),
+                mock.patch.object(cli, "restore_blob"),
+                mock.patch.object(cli, "_adb", return_value=fake_adb),
+                mock.patch.object(
+                    cli, "acquire_stable", return_value=(image, {})
+                ),
+                mock.patch.object(
+                    cli, "validate_post_restore_readback", return_value=True
+                ),
+                mock.patch.object(
+                    cli, "start_adb_through_upload_command"
+                ) as start_adb,
+                mock.patch.object(
+                    sys, "stdin", SimpleNamespace(isatty=lambda: True)
+                ),
+                mock.patch("builtins.input", return_value="yes") as prompt,
+                mock.patch.object(
+                    cli.time,
+                    "monotonic",
+                    side_effect=[100.0, 100.25, 100.75, 101.0],
+                ),
+                redirect_stdout(io.StringIO()),
+            ):
+                status = cli.command_restore(args)
+        self.assertEqual(status, 0)
+        prompt.assert_called_once()
+        start_adb.assert_called_once_with()
+        fake_adb.ensure_available.assert_called_once_with(timeout=6.75)
+        fake_adb.wait_for_device.assert_called_once_with(timeout=6.0)
+
+    def test_restore_declined_temporary_adb_start_sends_no_hid(self):
+        image = b"replacement image"
+        fake_adb = mock.Mock()
+        fake_adb.ensure_available.side_effect = AdbUnavailable("device offline")
+        with tempfile.TemporaryDirectory() as directory:
+            image_path = Path(directory) / "replacement.bin"
+            image_path.write_bytes(image)
+            args = SimpleNamespace(
+                image=str(image_path),
+                backup="backup.zip",
+                yes=True,
+                enumeration_timeout=30,
+                reboot_timeout=180,
+                no_post_verify=False,
+                adb_timeout=7,
+                adb="adb",
+                serial=None,
+            )
+            with (
+                mock.patch.object(
+                    cli,
+                    "load_preserved_backup",
+                    return_value=(image, {"sha256": "different"}),
+                ),
+                mock.patch.object(cli, "validate_full_restore_image"),
+                mock.patch.object(cli, "validate_replacement_against_backup"),
+                mock.patch.object(
+                    cli,
+                    "build_update_blob",
+                    return_value=(b"blob", mock.sentinel.plan),
+                ),
+                mock.patch.object(cli, "enter_bootloader"),
+                mock.patch.object(cli, "wait_for_hid"),
+                mock.patch.object(cli, "restore_blob"),
+                mock.patch.object(cli, "_adb", return_value=fake_adb),
+                mock.patch.object(
+                    cli, "start_adb_through_upload_command"
+                ) as start_adb,
+                mock.patch.object(cli, "acquire_stable") as acquire,
+                mock.patch.object(
+                    sys, "stdin", SimpleNamespace(isatty=lambda: True)
+                ),
+                mock.patch("builtins.input", return_value=""),
+                redirect_stdout(io.StringIO()),
+                self.assertRaisesRegex(ProtocolError, "declined"),
+            ):
+                cli.command_restore(args)
+        start_adb.assert_not_called()
+        fake_adb.wait_for_device.assert_not_called()
+        acquire.assert_not_called()
+
+    def test_noninteractive_restore_never_starts_temporary_adb(self):
+        image = b"replacement image"
+        fake_adb = mock.Mock()
+        fake_adb.ensure_available.side_effect = AdbUnavailable("device offline")
+        with tempfile.TemporaryDirectory() as directory:
+            image_path = Path(directory) / "replacement.bin"
+            image_path.write_bytes(image)
+            args = SimpleNamespace(
+                image=str(image_path),
+                backup="backup.zip",
+                yes=True,
+                enumeration_timeout=30,
+                reboot_timeout=180,
+                no_post_verify=False,
+                adb_timeout=7,
+                adb="adb",
+                serial=None,
+            )
+            with (
+                mock.patch.object(
+                    cli,
+                    "load_preserved_backup",
+                    return_value=(image, {"sha256": "different"}),
+                ),
+                mock.patch.object(cli, "validate_full_restore_image"),
+                mock.patch.object(cli, "validate_replacement_against_backup"),
+                mock.patch.object(
+                    cli,
+                    "build_update_blob",
+                    return_value=(b"blob", mock.sentinel.plan),
+                ),
+                mock.patch.object(cli, "enter_bootloader"),
+                mock.patch.object(cli, "wait_for_hid"),
+                mock.patch.object(cli, "restore_blob"),
+                mock.patch.object(cli, "_adb", return_value=fake_adb),
+                mock.patch.object(
+                    cli, "start_adb_through_upload_command"
+                ) as start_adb,
+                mock.patch.object(cli, "acquire_stable") as acquire,
+                mock.patch.object(sys, "stdin", io.StringIO()),
+                mock.patch("builtins.input") as prompt,
+                redirect_stdout(io.StringIO()),
+                self.assertRaisesRegex(ProtocolError, "interactive confirmation"),
+            ):
+                cli.command_restore(args)
+        prompt.assert_not_called()
+        start_adb.assert_not_called()
+        fake_adb.wait_for_device.assert_not_called()
+        acquire.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -233,6 +233,36 @@ exposes the final ZIP. Publication cannot replace an archive that appears
 concurrently, and an interruption cannot publish only the image or only its
 evidence. Standard ZIP tools can extract `flash.bin` for independent inspection.
 
+### Hardware-recovery interoperability
+
+Pass the unmodified ZIP directly to the hardware-recovery builder; its embedded
+three-consecutive-read evidence satisfies that tool's physical-read gate:
+
+```sh
+python ../hardware-recovery/cc2_sig_tool.py analyze backup.zip
+python ../hardware-recovery/cc2_sig_tool.py build backup.zip
+```
+
+The builder writes
+`backup-cc2-recovery/cc2-camera-recovery.bin`. It does not alter or replace
+`backup.zip`. Preserve that original archive: it remains the acquisition
+evidence required by restore.
+
+Validate the resulting pair without opening USB:
+
+```sh
+cc2flash plan-restore \
+  backup-cc2-recovery/cc2-camera-recovery.bin \
+  --backup backup.zip
+```
+
+This proves that the candidate is a full restore image and is byte-identical to
+the preserved camera backup everywhere except hardware recovery's audited
+`0x463000–0x46afff` SquashFS patch window and
+`0x7e0000–0x7fffff` config partition. The same compatibility check runs again
+before `restore` opens USB, preventing a recovery image from another camera
+or an image with unsupported additional edits from being written.
+
 If ADB lists more than one device, pass the camera serial explicitly:
 
 ```sh
@@ -246,7 +276,7 @@ The exact serial exposed by ADB may differ; use `cc2flash list` to inspect it.
 Validate a candidate without opening USB:
 
 ```sh
-cc2flash plan-restore fixed.bin
+cc2flash plan-restore fixed.bin --backup backup.zip
 ```
 
 A full restore requires exactly `0x800000` bytes.  It also rejects an image
@@ -255,6 +285,8 @@ would return to upgrade mode on every reboot.
 
 Restore requires the separately preserved three-read backup and its v2
 manifest.
+The replacement must match that backup outside the two hardware-recovery
+regions documented above.
 The transport parses each nonfinal ACK as the next expected absolute packet and
 aborts if U-Boot requests retransmission, which this research client does not yet
 implement:
@@ -272,18 +304,30 @@ require the literal confirmation `RESTORE-CC2`. Its planned phases are:
 4. Transfer a 128-byte update header plus the image in numbered packets.
 5. Require the bootloader's whole-image MD5 success indication.
 6. Wait without removing power while the bootloader erases, writes, and reboots.
-7. If ADB is available, acquire three consecutive identical flash images over
-   ADB and compare the accepted image with `fixed.bin` byte for byte.
+7. Ensure root ADB is online. If it is offline, ask interactively whether to
+   start `/bin/adbd` temporarily through normal HID; only an explicit `y` or
+   `yes` sends that command. Then acquire three consecutive identical flash
+   images over ADB.
+8. Require every boot-stable byte from `0x000000` through the end of HWCONFIG at
+   `0x7dffff` to match `fixed.bin`. Report whether config also stayed exact;
+   clean-data images legitimately create default config files during this boot.
 
 The bootloader reports MD5 acceptance **before** erase/write and offers no
 post-write status or readback. An independently available ADB or programmer
 read is therefore required for end-to-end verification. `--no-post-verify`
 gives up that assurance.
 
-`--adb-timeout` bounds only the wait for ADB to become online after normal-mode
-USB returns. Once ADB is online, stable post-write verification begins as a
-separate operation with the ordinary per-command timeouts; the option does not
-claim to bound up to five complete flash reads.
+Consent to the flash write and consent to start ADB are separate. `restore
+--yes` skips only the typed `RESTORE-CC2` write confirmation. It does not answer
+the later ADB question. Empty or negative input, and non-interactive stdin, send
+no ADB-start HID command and leave the completed restore explicitly
+unverified.
+
+`--adb-timeout` is one deadline shared by the initial bounded ADB probe and, if
+the temporary start is explicitly confirmed, the post-HID wait for ADB to come
+online. Once ADB is online, stable post-write verification begins as a separate
+operation with the ordinary per-command timeouts; the option does not claim to
+bound up to five complete flash reads.
 
 Do not unplug the camera after the MD5 response.  A failed transfer before the
 MD5 check does not erase flash, but the persistent flag may leave the camera in
@@ -322,13 +366,16 @@ See [PROTOCOL.md](PROTOCOL.md) for the recovered wire formats and
 python -m unittest discover -s tests -v
 ```
 
-The 78 tests exercise the 57-entry normal command catalog, all configuration and
+The 85 tests exercise the 57-entry normal command catalog, all configuration and
 upload mappings, command builders, U-Boot frame types/ACK decoders, frame
 vectors, checksums, image headers, packet numbering, partition validation, ADB
 absence/offline/error classification, three-consecutive-of-five acquisition,
 boot-hash gating, create-if-absent ZIP publication, strict v2 manifest parsing
 including JSON decoder-limit failures,
 unsupported-compression rejection, both explicit ADB startup commands,
+hardware-recovery region compatibility, boot-stable post-write comparison,
+separately confirmed temporary ADB startup after a clean-data restore, and
+pre-USB wrong-unit rejection,
 bounded/validated availability timeouts, expected final-commit
 failure/disconnection, the Windows `error: closed`
 transport handoff, legacy text-shell parsing, ordered binary MTD pulls and

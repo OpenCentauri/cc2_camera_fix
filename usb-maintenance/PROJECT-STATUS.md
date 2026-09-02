@@ -1,6 +1,6 @@
 # Project status
 
-**Documentation checkpoint: 2026-09-01**
+**Documentation checkpoint: 2026-09-02**
 
 ## Completed
 
@@ -46,10 +46,19 @@
   the implementation.
 - Refactored the CLI-used HID paths to consume the public builders rather than
   maintaining a second set of command literals.
+- Added direct interoperability with hardware recovery: its builder consumes
+  the preserved USB ZIP, while `plan-restore --backup` and `restore` prove the
+  generated image matches that same camera outside the two audited edit
+  regions.
+- Made post-write verification compatible with both hardware-recovery config
+  modes: after a clean-data boot it separately prompts for permission to start
+  ADB temporarily, requires an exact match through HWCONFIG, and separately
+  reports config changes made by that boot. It never treats restore `--yes` as
+  consent to start ADB.
 
 ## Client status
 
-The included Python client is now v0.5.0 with 78 passing offline tests. Its
+The included Python client is now v0.6.0 with 85 passing offline tests. Its
 backup path is strictly read-only and requires three consecutive identical full
 reads within five attempts. Temporary and persistent ADB setup are separate
 commands rather than fallback flags on `backup`. An accepted backup is one ZIP
@@ -60,6 +69,17 @@ type-5` sequence. It rejects a retransmission request with an explicit error;
 automatic retransmission is not implemented. Restore therefore remains
 hardware-unverified rather than known wire-incompatible.
 
+Before opening USB, restore now compares the replacement with `flash.bin` from
+the validated preserved ZIP. Only hardware recovery's exact SquashFS patch
+window and config partition may differ. This rejects a wrong-camera recovery
+image or unsupported additional edits. The same check is available read-only
+through `plan-restore --backup`.
+
+After restore, the client acquires another three consecutive reads. All bytes
+through `0x7dffff` must match the candidate exactly. The writable config
+partition is compared and reported separately because the first successful
+clean-data boot recreates missing defaults before ADB can read it back.
+
 The expanded tests verify exact catalog completeness, all 21 configuration
 pairs, all 13 uploader commands, all four U-Boot frame types, group-wide
 `0x4xxx` behavior, builders/decoders, stable-read/hash/archive gates, bounded
@@ -68,8 +88,14 @@ malformed-manifest, JSON decoder-limit, unsupported-ZIP, and corrupt
 compressed-member rejection,
 hard failure on a hung ADB subprocess, the exact
 `3000 → 3110 → 3200(final) → 3300` ADB-startup upload, interactive guards, and
-the temporary command-injection transaction and the prior backup/image safety
+proof that declined or non-interactive post-restore prompts send no HID command,
+the temporary command-injection transaction, and the prior backup/image safety
 checks.
+
+Post-restore ADB availability uses one deadline for the preliminary probe and
+the post-HID wait. The preliminary `get-state` subprocess cannot exceed
+`--adb-timeout`, and it no longer adds its default ten-second budget before the
+documented wait.
 
 Without any setup, the stock USB gadget always enumerates an ADB transport as
 `offline` until `adbd` starts. The availability classifier treats that exact

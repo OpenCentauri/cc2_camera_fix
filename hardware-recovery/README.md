@@ -14,7 +14,8 @@ Normally JFFS2 garbage collection would reclaim the obsolete copies. On this fir
 
 This tool repairs both parts of that problem:
 
-- it rebuilds the exhausted `config` partition while preserving the camera's own serial data;
+- it rebuilds the exhausted `config` partition, either keeping only the
+  camera's own serial data or recreating every live regular file once;
 - it changes the startup script to create each default file only when it is missing, stopping the deterministic write leak.
 
 ## Check that the camera is actually the problem
@@ -75,9 +76,11 @@ The full system filesystem is not rebuilt. The tool verifies and decompresses th
 
 The input window, compressed fragment, decompressed fragment, original `bashrc.sh`, generated `bashrc.sh`, generated XZ stream, and final window each have independent expected SHA-256 checks. The shorter patched XZ stream intentionally leaves the now-unaddressed trailing stock bytes untouched; the authoritative SquashFS fragment size excludes them.
 
-### Compact config recovery
+### Config recovery modes
 
-The builder extracts the camera's own CRC-valid `serial.cfg` and creates a minimal 128 KiB JFFS2 partition containing:
+`clean-data` is the default and retains the original recovery behavior. The
+builder extracts the camera's own CRC-valid `serial.cfg` and creates a minimal
+128 KiB JFFS2 partition containing:
 
 - one cleanmarker;
 - one `serial.cfg` directory entry;
@@ -87,39 +90,109 @@ The builder extracts the camera's own CRC-valid `serial.cfg` and creates a minim
 
 The five standard UVC/config files are intentionally omitted. The patched startup script creates each missing default once on the first successful boot.
 
+Clean mode refuses to discard CRC-valid names outside the audited stock set.
+If you have inspected the source and intentionally want to wipe unfamiliar
+config contents too, add `--wipe-unknown-config`. That override still preserves
+and cross-checks `serial.cfg`; it is not permission to ignore identity or
+firmware validation failures.
+
+`preserve-data` instead resolves the current root-directory view and recreates
+every live regular file once in a fresh compact JFFS2 image. It preserves file
+contents, mode, owner, timestamps, flags, inode identity, and directory-entry
+metadata, while dropping obsolete/dead historical nodes. It supports
+uncompressed, zero-filled, and zlib-compressed source fragments and fails
+closed on directories, links/special entries, ambiguous metadata, unsupported
+compression, fragments larger than the config partition, zlib streams that
+expand beyond their declared size, or a live set too large for the audited
+compact layout. Zlib decoding caps output at the declared size plus one byte.
+
 ## Usage
 
-Download `cc2_sig_tool.py` from this repository and place it in a working directory. You need Python 3.10 or later and a full 8 MiB dump from your camera. Do not continue to a write until you have three independently read dumps with identical SHA-256 hashes.
+Download `cc2_sig_tool.py` from this repository and place it in a working directory. You need Python 3.10 or later and either a raw full 8 MiB dump from your camera or an unmodified `cc2flash-backup-v2` ZIP created by the USB-maintenance tool. Do not continue to a write until you have evidence for three identical physical reads.
 
-The examples below use the Windows Python launcher because NeoProgrammer is a Windows application. On Linux or macOS, replace `py` with `python3`.
+For raw programmer dumps, supply three independently read files with identical
+SHA-256 hashes as shown below. For a USB backup ZIP, the builder validates
+`flash.bin`, `manifest.json`, the exact member set, hashes, boot fingerprint,
+partition map, and three-consecutive-read acquisition evidence. A valid ZIP
+therefore satisfies the three-read gate directly; do not extract or rewrite it.
+
+The command-line examples in this section use a normal Unix shell and
+`python3`. The later NeoProgrammer walkthrough uses Windows syntax where the
+programmer software requires it.
 
 Run the internal self-test. Supplying a supported ROM also exercises the complete readable SquashFS patch path:
 
-```bat
-py cc2_sig_tool.py self-test cc2-camera-1.bin
+```sh
+python3 cc2_sig_tool.py self-test cc2-camera-1.bin
 ```
 
 Analyze without creating anything:
 
-```bat
-py cc2_sig_tool.py analyze cc2-camera-1.bin
+```sh
+python3 cc2_sig_tool.py analyze cc2-camera-1.bin
 ```
+
+The equivalent USB-backup workflow is:
+
+```sh
+python3 cc2_sig_tool.py analyze backup.zip
+python3 cc2_sig_tool.py build backup.zip
+```
+
+The second command creates
+`backup-cc2-recovery/cc2-camera-recovery.bin`. Keep the original
+`backup.zip` unchanged: USB maintenance uses it both as the preserved
+three-read backup and to prove that the recovery image belongs to the same
+camera before restoring it.
+
+Choose the config treatment explicitly when the default is not appropriate:
+
+```sh
+# Default: wipe ordinary config and preserve only serial.cfg
+python3 cc2_sig_tool.py build backup.zip --config-mode clean-data
+
+# Same clean rebuild, after explicitly approving unfamiliar config names
+python3 cc2_sig_tool.py build backup.zip --wipe-unknown-config
+
+# Recreate every live regular config file once, without dead JFFS2 copies
+python3 cc2_sig_tool.py build backup.zip --config-mode preserve-data
+```
+
+Raw 8 MiB backups are first-class inputs. For a bricked camera, raw dumps made
+with an external programmer are the only acquisition path; supply three stable
+reads with `--confirm` as described below.
 
 Build a recovery bundle and require three physical reads to be byte-identical:
 
-```bat
-py cc2_sig_tool.py build cc2-camera-1.bin --confirm cc2-camera-2.bin cc2-camera-3.bin
+```sh
+python3 cc2_sig_tool.py build cc2-camera-1.bin --confirm cc2-camera-2.bin cc2-camera-3.bin
 ```
 
 For a non-reference unit, three byte-identical physical reads are required by default. With fewer reads, the tool refuses unless the higher risk is explicitly accepted:
 
-```bat
-py cc2_sig_tool.py build cc2-camera-1.bin --allow-fewer-reads
+```sh
+python3 cc2_sig_tool.py build cc2-camera-1.bin --allow-fewer-reads
 ```
 
 Exact full reference dumps listed in `REFERENCE_FINGERPRINTS.json` may be rebuilt from one copy because their complete 8 MiB hashes already match known inputs.
 
-The default output directory is:
+To validate the complete USB round trip without opening USB:
+
+```sh
+cc2flash plan-restore backup-cc2-recovery/cc2-camera-recovery.bin --backup backup.zip
+```
+
+If that passes, the corresponding guarded write command is:
+
+```sh
+cc2flash restore backup-cc2-recovery/cc2-camera-recovery.bin --backup backup.zip
+```
+
+USB maintenance refuses the candidate if any byte outside this builder's
+audited `0x463000–0x46AFFF` system window and
+`0x7E0000–0x7FFFFF` config partition differs from the preserved backup.
+
+For the raw `cc2-camera-1.bin` example, the default output directory is:
 
 ```text
 cc2-camera-1-cc2-recovery
@@ -146,11 +219,13 @@ SHA256SUMS.txt
 
 To patch only `bashrc.sh` while preserving the current config partition byte-for-byte:
 
-```bat
-py cc2_sig_tool.py build cc2-camera-1.bin --keep-config
+```sh
+python3 cc2_sig_tool.py build cc2-camera-1.bin --keep-config
 ```
 
 This option is accepted only when the partition already equals the exact canonical rebuild. It refuses exhausted or otherwise noncanonical config, because preserving one could leave the device bricked.
+It cannot be combined with `--config-mode preserve-data` or
+`--wipe-unknown-config`.
 
 ## Programmer instructions
 
@@ -239,7 +314,9 @@ py cc2_sig_tool.py verify cc2-camera-recovery.bin cc2-camera-readback.bin
 
 Success is reported only when the files are byte-for-byte identical.
 
-`verify` first requires the expected file to be a strict, patched, canonical recovery image, then requires the full readback to be byte-for-byte identical.
+`verify` first requires the expected file to be a strict, patched recovery image
+with a safely reconstructable config, then requires the full readback to be
+byte-for-byte identical. Both clean-data and preserve-data outputs are valid.
 
 Only disconnect the programmer and attempt a normal boot after this comparison succeeds. Never connect normal camera/USB power and programmer target power simultaneously.
 
@@ -284,7 +361,10 @@ The validator therefore performs the strongest safe equivalent of “100% match 
 4. The excluded fields are still validated:
    - the UOID must have the expected 94-byte structure;
    - `config` must contain CRC-valid JFFS2 nodes;
-   - only the six known filenames are accepted;
+   - clean-data accepts only the six known filenames unless
+     `--wipe-unknown-config` is explicit;
+   - preserve-data accepts additional live names only when every entry can be
+     safely reconstructed as a regular root file;
    - exactly one unambiguous `serial.cfg` value must be recoverable;
    - the serial and UOID must share the expected 12-byte unit prefix.
 
@@ -302,8 +382,10 @@ The builder:
 - never edits boot, kernel, root, or HWCONFIG;
 - preserves the entire input HWCONFIG partition;
 - preserves the original serial payload;
-- validates the generated JFFS2 image by parsing it again;
+- validates the generated JFFS2 image by parsing it again, including a complete
+  content/metadata round trip in preserve-data mode;
 - refuses `--keep-config` for a noncanonical/exhausted partition;
+- refuses ambiguous, unsupported, or oversized preserve-data layouts;
 - refuses unsafe output-directory reuse that could delete inputs or unrelated files;
 - validates the complete generated recovery image again;
 - proves no bytes changed outside the selected patch/config regions;

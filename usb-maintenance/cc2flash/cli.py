@@ -8,6 +8,7 @@ import json
 import math
 from pathlib import Path
 import sys
+import time
 
 from . import __version__
 from .adb_backup import (
@@ -15,9 +16,11 @@ from .adb_backup import (
     AdbUnavailable,
     acquire_stable,
     hashes,
+    load_preserved_backup,
     save_backup,
     validate_backup_archive_path,
-    validate_preserved_backup,
+    validate_post_restore_readback,
+    validate_replacement_against_backup,
 )
 from .hid_transport import (
     ADB_STARTUP_CONTENT,
@@ -264,14 +267,25 @@ def command_install_adb_startup(args) -> int:
 
 
 def command_plan(args) -> int:
-    image = Path(args.image).read_bytes()
+    image_path = Path(args.image)
+    image = image_path.read_bytes()
     validate_full_restore_image(image)
+    backup_path = Path(args.backup) if args.backup else None
+    backup_hashes = None
+    if backup_path is not None:
+        backup_image, backup_hashes = load_preserved_backup(backup_path)
+        validate_replacement_against_backup(image, backup_image)
     blob, plan = build_update_blob(image)
     result = {
-        "image": str(Path(args.image)),
+        "image": str(image_path),
         "image_size": len(image),
         "image_sha256": hashlib.sha256(image).hexdigest(),
         "image_md5": hashlib.md5(image).hexdigest(),
+        "preserved_backup": str(backup_path) if backup_path else None,
+        "preserved_backup_sha256": (
+            backup_hashes["sha256"] if backup_hashes else None
+        ),
+        "preserved_backup_compatible": backup_path is not None,
         "flash_offset": plan.flash_offset,
         "transfer_size": plan.transfer_size,
         "packets": plan.packet_count,
@@ -294,12 +308,33 @@ def _confirm(image_path: Path, image_hashes: dict, backup_path: Path) -> None:
         raise ProtocolError("confirmation did not match; nothing was written")
 
 
+def _confirm_temporary_adb_for_readback() -> None:
+    """Require separate consent before starting adbd after a restore."""
+
+    if not sys.stdin.isatty():
+        raise ProtocolError(
+            "ADB is offline after restore; temporary ADB startup requires an "
+            "interactive confirmation. No HID ADB-start command was sent, and "
+            "the restore is not post-verified"
+        )
+    answer = input(
+        "ADB is offline after restore. Start /bin/adbd temporarily through "
+        "normal HID for post-write readback? [y/N] "
+    )
+    if answer.strip().casefold() not in {"y", "yes"}:
+        raise ProtocolError(
+            "temporary ADB startup was declined. No HID ADB-start command was "
+            "sent, and the restore is not post-verified"
+        )
+
+
 def command_restore(args) -> int:
     image_path = Path(args.image)
     backup_path = Path(args.backup)
-    backup_hashes = validate_preserved_backup(backup_path)
+    backup_image, backup_hashes = load_preserved_backup(backup_path)
     image = image_path.read_bytes()
     validate_full_restore_image(image)
+    validate_replacement_against_backup(image, backup_image)
     image_hashes = hashes(image)
     if image_hashes["sha256"] == backup_hashes["sha256"]:
         print("Note: replacement image is byte-identical to the preserved backup.")
@@ -334,12 +369,48 @@ def command_restore(args) -> int:
         "reads for post-write verification."
     )
     adb = _adb(args)
+    adb_deadline = time.monotonic() + args.adb_timeout
     try:
+        remaining = adb_deadline - time.monotonic()
+        if remaining <= 0:
+            raise ProtocolError(
+                "post-restore ADB availability timeout expired; write is not "
+                "post-verified"
+            )
+        adb.ensure_available(timeout=min(10.0, remaining))
+    except AdbUnavailable:
+        _confirm_temporary_adb_for_readback()
+        remaining = adb_deadline - time.monotonic()
+        if remaining <= 0:
+            raise ProtocolError(
+                "post-restore ADB availability timeout expired before the "
+                "temporary start. No HID ADB-start command was sent, and the "
+                "restore is not post-verified"
+            )
+        try:
+            start_adb_through_upload_command()
+        except ProtocolError as exc:
+            raise ProtocolError(
+                "normal HID returned, but the explicitly confirmed temporary "
+                "ADB start failed; write is not post-verified"
+            ) from exc
+        remaining = adb_deadline - time.monotonic()
+        if remaining <= 0:
+            raise ProtocolError(
+                "post-restore ADB availability timeout expired after the "
+                "confirmed temporary start; write is not post-verified"
+            )
+        try:
+            adb.wait_for_device(timeout=remaining)
+        except ProtocolError as exc:
+            raise ProtocolError(
+                "normal HID returned, but ADB readback did not become available; "
+                "write is not post-verified"
+            ) from exc
         # --adb-timeout deliberately bounds only the transition to an online
         # daemon. Stable acquisition is a separate operation: each pull keeps
         # its normal command timeout and no completed read is discarded merely
         # because the availability window expired while verification ran.
-        adb.wait_for_device(timeout=args.adb_timeout)
     except ProtocolError as exc:
         raise ProtocolError(
             "normal HID returned, but ADB readback did not become available; "
@@ -352,12 +423,18 @@ def command_restore(args) -> int:
             "ADB became available, but stable post-write readback failed; "
             f"write is not post-verified: {exc}"
         ) from exc
-    if verified != image:
-        raise ProtocolError("post-write flash readback differs from the replacement image")
-    print(
-        "Restore complete: three consecutive post-write reads exactly match "
-        "the input image."
-    )
+    config_exact = validate_post_restore_readback(image, verified)
+    if config_exact:
+        print(
+            "Restore complete: three consecutive post-write reads exactly "
+            "match the input image."
+        )
+    else:
+        print(
+            "Restore complete: three consecutive post-write reads match every "
+            "boot-stable byte through HWCONFIG. Config changed during the "
+            "required verification boot and was not claimed byte-exact."
+        )
     print(f"SHA256: {image_hashes['sha256']}")
     return 0
 
@@ -428,6 +505,13 @@ def parser() -> argparse.ArgumentParser:
 
     plan = commands.add_parser("plan-restore", help="validate and describe an image; no USB writes")
     plan.add_argument("image")
+    plan.add_argument(
+        "--backup",
+        help=(
+            "preserved cc2flash ZIP; also prove the image differs only in "
+            "hardware-recovery's audited regions"
+        ),
+    )
     plan.set_defaults(func=command_plan)
 
     restore = commands.add_parser("restore", parents=[common], help="restore one full 8 MiB image")

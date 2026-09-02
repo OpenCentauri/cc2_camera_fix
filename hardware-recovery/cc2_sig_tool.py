@@ -25,13 +25,16 @@ import lzma
 import re
 import struct
 import sys
+import zipfile
 import zlib
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-TOOL_VERSION = "1.1.0"
+TOOL_VERSION = "1.2.0"
 MIN_IDENTICAL_READS = 3
+MAX_USB_READ_ATTEMPTS = 5
 
 FLASH_SIZE = 0x800000
 PATCH_START = 0x463000
@@ -40,6 +43,25 @@ PATCH_SIZE = PATCH_END - PATCH_START
 CONFIG_START = 0x7E0000
 CONFIG_END = 0x800000
 CONFIG_SIZE = CONFIG_END - CONFIG_START
+
+USB_BACKUP_FORMAT = "cc2flash-backup-v2"
+USB_BACKUP_IMAGE_MEMBER = "flash.bin"
+USB_BACKUP_MANIFEST_MEMBER = "manifest.json"
+USB_BACKUP_MEMBERS = frozenset(
+    (USB_BACKUP_IMAGE_MEMBER, USB_BACKUP_MANIFEST_MEMBER)
+)
+MAX_USB_MANIFEST_SIZE = 1024 * 1024
+KNOWN_BOOTLOADER_SHA256 = (
+    "5602ec961b4410ccceea0d4910e4fa768c6998bd4ba86143ba50855bdd0b7a54"
+)
+EXPECTED_USB_PARTITIONS = (
+    (0, 0x040000, "boot"),
+    (1, 0x150000, "kernel"),
+    (2, 0x158000, "root"),
+    (3, 0x4E8000, "system"),
+    (4, 0x010000, "hwconfig"),
+    (5, 0x020000, "config"),
+)
 
 # The HWCONFIG record contains a unit-specific two-byte check value and a
 # 94-byte encrypted/encoded UOID. Everything around these two fields is
@@ -156,8 +178,177 @@ class ValidationError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class ConfigFile:
+    name: bytes
+    data: bytes
+    inode: int
+    mode: int
+    uid: int
+    gid: int
+    atime: int
+    mtime: int
+    ctime: int
+    flags: int
+    dirent_mctime: int
+    dtype: int
+
+
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def image_hashes(data: bytes) -> dict[str, str | int]:
+    return {
+        "size": len(data),
+        "sha256": sha256(data),
+        "md5": hashlib.md5(data).hexdigest(),
+    }
+
+
+def _validate_usb_backup_manifest(manifest: Any, image: bytes) -> dict[str, Any]:
+    """Validate acquisition evidence produced by usb-maintenance/cc2flash."""
+
+    if not isinstance(manifest, dict):
+        raise ValidationError("USB backup manifest must be a JSON object")
+    if manifest.get("format") != USB_BACKUP_FORMAT:
+        raise ValidationError(
+            "USB backup requires a cc2flash-backup-v2 manifest with three "
+            "identical reads"
+        )
+
+    actual_hashes = image_hashes(image)
+    for key, expected in actual_hashes.items():
+        if manifest.get(key) != expected:
+            raise ValidationError(
+                f"USB backup manifest {key} does not match flash.bin"
+            )
+
+    boot_hash = sha256(image[:0x040000])
+    expected_bootloader = {
+        "partition": "boot",
+        "size": 0x040000,
+        "sha256": boot_hash,
+        "known_sha256": KNOWN_BOOTLOADER_SHA256,
+        "known_reference": boot_hash == KNOWN_BOOTLOADER_SHA256,
+    }
+    bootloader = manifest.get("bootloader")
+    if not isinstance(bootloader, dict):
+        raise ValidationError("USB backup manifest has no bootloader fingerprint")
+    for key, expected in expected_bootloader.items():
+        if bootloader.get(key) != expected:
+            raise ValidationError(
+                f"USB backup manifest bootloader {key} does not match flash.bin"
+            )
+    acceptance = bootloader.get("acceptance")
+    expected_acceptance = (
+        "known-reference"
+        if expected_bootloader["known_reference"]
+        else "explicit-hash"
+    )
+    if acceptance != expected_acceptance:
+        raise ValidationError(
+            "USB backup manifest does not contain the required bootloader "
+            "hash acceptance"
+        )
+
+    if manifest.get("required_identical_reads") != MIN_IDENTICAL_READS:
+        raise ValidationError("USB backup does not require three identical reads")
+    consecutive = manifest.get("consecutive_identical_reads")
+    if type(consecutive) is not int or consecutive != MIN_IDENTICAL_READS:
+        raise ValidationError(
+            "USB backup lacks three consecutive identical physical reads"
+        )
+    read_passes = manifest.get("read_passes")
+    if type(read_passes) is not int or not (
+        MIN_IDENTICAL_READS <= read_passes <= MAX_USB_READ_ATTEMPTS
+    ):
+        raise ValidationError("USB backup has an invalid physical-read count")
+    if manifest.get("maximum_read_attempts") != MAX_USB_READ_ATTEMPTS:
+        raise ValidationError("USB backup has an unexpected read-attempt policy")
+
+    partitions = manifest.get("partitions")
+    if not isinstance(partitions, list) or len(partitions) != len(
+        EXPECTED_USB_PARTITIONS
+    ):
+        raise ValidationError("USB backup manifest has an invalid partition map")
+    for item, (index, size, name) in zip(
+        partitions, EXPECTED_USB_PARTITIONS
+    ):
+        if (
+            not isinstance(item, dict)
+            or item.get("index") != index
+            or item.get("size") != size
+            or not isinstance(item.get("name"), str)
+            or item["name"].casefold() != name
+        ):
+            raise ValidationError("USB backup manifest has an invalid partition map")
+
+    return {
+        "format": USB_BACKUP_FORMAT,
+        "image_member": USB_BACKUP_IMAGE_MEMBER,
+        "read_passes": read_passes,
+        "required_identical_reads": MIN_IDENTICAL_READS,
+        "consecutive_identical_reads": consecutive,
+        "maximum_read_attempts": MAX_USB_READ_ATTEMPTS,
+        "bootloader_acceptance": acceptance,
+        **actual_hashes,
+    }
+
+
+def read_image_source(path: Path) -> tuple[bytes, dict[str, Any]]:
+    """Read a raw dump or a strict cc2flash backup ZIP without extracting it."""
+
+    if path.suffix.casefold() != ".zip":
+        image = path.read_bytes()
+        return image, {
+            "format": "raw-flash-image",
+            "image_member": None,
+            "evidenced_identical_reads": 1,
+            **image_hashes(image),
+        }
+
+    try:
+        with zipfile.ZipFile(path, mode="r") as archive:
+            infos = archive.infolist()
+            names = [item.filename for item in infos]
+            if len(names) != 2 or set(names) != USB_BACKUP_MEMBERS:
+                raise ValidationError(
+                    "USB backup ZIP must contain exactly flash.bin and manifest.json"
+                )
+            by_name = {item.filename: item for item in infos}
+            if any(item.flag_bits & 0x1 for item in infos):
+                raise ValidationError("USB backup ZIP must not be encrypted")
+            if by_name[USB_BACKUP_IMAGE_MEMBER].file_size != FLASH_SIZE:
+                raise ValidationError("USB backup flash.bin is not exactly 8 MiB")
+            if (
+                by_name[USB_BACKUP_MANIFEST_MEMBER].file_size
+                > MAX_USB_MANIFEST_SIZE
+            ):
+                raise ValidationError("USB backup manifest is unexpectedly large")
+            image = archive.read(USB_BACKUP_IMAGE_MEMBER)
+            manifest_bytes = archive.read(USB_BACKUP_MANIFEST_MEMBER)
+    except ValidationError:
+        raise
+    except (
+        OSError,
+        RuntimeError,
+        NotImplementedError,
+        zipfile.BadZipFile,
+        zlib.error,
+        lzma.LZMAError,
+    ) as exc:
+        raise ValidationError("USB backup ZIP is unreadable or corrupt") from exc
+
+    if len(image) != FLASH_SIZE:
+        raise ValidationError("USB backup flash.bin is not exactly 8 MiB")
+    try:
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
+        raise ValidationError("USB backup manifest is unreadable") from exc
+    evidence = _validate_usb_backup_manifest(manifest, image)
+    evidence["evidenced_identical_reads"] = MIN_IDENTICAL_READS
+    return image, evidence
 
 
 def jffs2_crc(data: bytes) -> int:
@@ -453,7 +644,171 @@ def serial_payload_is_valid(payload: bytes) -> bool:
     return SERIAL_PATTERN.fullmatch(payload) is not None
 
 
-def extract_serial_and_config_info(config: bytes) -> dict[str, Any]:
+def decode_jffs2_fragment(node: dict[str, Any], name: bytes) -> bytes:
+    compression = node["compression"]
+    decompressed_size = node["decompressed_size"]
+    if decompressed_size > CONFIG_SIZE:
+        raise ValidationError(
+            f"Live config file {name!r} has a fragment larger than the config "
+            "partition"
+        )
+    if compression == 0:
+        data = node["payload"]
+    elif compression == 1:
+        if node["compressed_size"] != 0:
+            raise ValidationError(
+                f"Live config file {name!r} has malformed zero compression"
+            )
+        data = b"\0" * decompressed_size
+    elif compression == 6:
+        try:
+            decompressor = zlib.decompressobj()
+            # The one-byte margin detects a stream that expands beyond its
+            # declared size without ever allowing more than CONFIG_SIZE + 1
+            # output bytes to be allocated.
+            data = decompressor.decompress(
+                node["payload"], decompressed_size + 1
+            )
+        except zlib.error as exc:
+            raise ValidationError(
+                f"Live config file {name!r} has invalid JFFS2 zlib data"
+            ) from exc
+        if len(data) != decompressed_size:
+            raise ValidationError(
+                f"Live config file {name!r} has a decompressed-size mismatch"
+            )
+        if (
+            not decompressor.eof
+            or decompressor.unconsumed_tail
+            or decompressor.unused_data
+        ):
+            raise ValidationError(
+                f"Live config file {name!r} has invalid JFFS2 zlib data"
+            )
+    else:
+        raise ValidationError(
+            f"Live config file {name!r} uses unsupported JFFS2 compression "
+            f"{compression}"
+        )
+    if len(data) != decompressed_size:
+        raise ValidationError(
+            f"Live config file {name!r} has a decompressed-size mismatch"
+        )
+    return data
+
+
+def reconstruct_live_config_files(
+    nodes: list[dict[str, Any]],
+    current_dirents: dict[tuple[int, bytes], dict[str, Any]],
+) -> list[ConfigFile]:
+    nonroot = [
+        node
+        for (parent, _name), node in current_dirents.items()
+        if parent != 1 and node["inode"] != 0
+    ]
+    if nonroot:
+        raise ValidationError(
+            "Preserve-data mode does not support live config subdirectories"
+        )
+
+    files: list[ConfigFile] = []
+    seen_inodes: set[int] = set()
+    live_root = sorted(
+        (
+            (name, node)
+            for (parent, name), node in current_dirents.items()
+            if parent == 1 and node["inode"] != 0
+        ),
+        key=lambda item: item[0],
+    )
+    for name, dirent in live_root:
+        if (
+            not name
+            or len(name) > 255
+            or b"/" in name
+            or b"\0" in name
+            or dirent["dtype"] != 8
+        ):
+            raise ValidationError(
+                f"Preserve-data mode cannot safely recreate config entry {name!r}"
+            )
+        inode_number = dirent["inode"]
+        if inode_number <= 1:
+            raise ValidationError(
+                f"Live config file {name!r} has an invalid inode number"
+            )
+        if inode_number in seen_inodes:
+            raise ValidationError(
+                "Preserve-data mode found multiple live names for one inode"
+            )
+        seen_inodes.add(inode_number)
+        fragments = [
+            node
+            for node in nodes
+            if node.get("kind") == "inode"
+            and node["current"]
+            and node["inode"] == inode_number
+        ]
+        if not fragments:
+            raise ValidationError(
+                f"Live config file {name!r} has no CRC-valid current inode"
+            )
+        fragments.sort(key=lambda item: item["version"])
+        newest_version = fragments[-1]["version"]
+        newest = [
+            node for node in fragments if node["version"] == newest_version
+        ]
+        if len(newest) != 1:
+            raise ValidationError(
+                f"Live config file {name!r} has ambiguous newest metadata"
+            )
+        metadata = newest[0]
+        if metadata["mode"] & 0xF000 != 0x8000:
+            raise ValidationError(
+                f"Preserve-data mode supports only regular files, not {name!r}"
+            )
+        file_size = metadata["file_size"]
+        if file_size < 0 or file_size > CONFIG_SIZE:
+            raise ValidationError(
+                f"Live config file {name!r} has an impossible size"
+            )
+        data = bytearray(file_size)
+        for fragment in fragments:
+            decoded = decode_jffs2_fragment(fragment, name)
+            start = fragment["file_offset"]
+            if start < 0:
+                raise ValidationError(
+                    f"Live config file {name!r} has a negative file offset"
+                )
+            if start >= file_size or not decoded:
+                continue
+            end = min(start + len(decoded), file_size)
+            data[start:end] = decoded[: end - start]
+        files.append(
+            ConfigFile(
+                name=name,
+                data=bytes(data),
+                inode=inode_number,
+                mode=metadata["mode"],
+                uid=metadata["uid"],
+                gid=metadata["gid"],
+                atime=metadata["atime"],
+                mtime=metadata["mtime"],
+                ctime=metadata["ctime"],
+                flags=metadata["flags"],
+                dirent_mctime=dirent["mctime"],
+                dtype=dirent["dtype"],
+            )
+        )
+    return files
+
+
+def extract_serial_and_config_info(
+    config: bytes,
+    *,
+    allow_unknown_names: bool = False,
+    preserve_live_files: bool = False,
+) -> dict[str, Any]:
     nodes = parse_jffs2(config)
     if not nodes:
         raise ValidationError("No CRC-valid JFFS2 nodes were found in config")
@@ -461,7 +816,7 @@ def extract_serial_and_config_info(config: bytes) -> dict[str, Any]:
     valid_dirents = [n for n in nodes if n.get("kind") == "dirent"]
     all_names = {n["name"] for n in valid_dirents}
     unexpected_names = sorted(all_names - KNOWN_CONFIG_NAMES)
-    if unexpected_names:
+    if unexpected_names and not allow_unknown_names:
         printable = ", ".join(repr(name) for name in unexpected_names)
         raise ValidationError(
             "Config contains unexpected CRC-valid names that this tool will not "
@@ -474,6 +829,10 @@ def extract_serial_and_config_info(config: bytes) -> dict[str, Any]:
             continue
         key = (node["parent_inode"], node["name"])
         previous = current_dirents.get(key)
+        if previous is not None and node["version"] == previous["version"]:
+            raise ValidationError(
+                f"Config has ambiguous current directory entries for {node['name']!r}"
+            )
         if previous is None or node["version"] > previous["version"]:
             current_dirents[key] = node
 
@@ -537,6 +896,40 @@ def extract_serial_and_config_info(config: bytes) -> dict[str, Any]:
     assert serial_match is not None
     serial_value = serial_match.group(1)
 
+    live_config_files: list[ConfigFile] | None = None
+    if preserve_live_files:
+        live_config_files = reconstruct_live_config_files(
+            nodes, current_dirents
+        )
+        by_name = {item.name: item for item in live_config_files}
+        live_serial = by_name.get(b"serial.cfg")
+        if live_serial is None:
+            used_inodes = {item.inode for item in live_config_files}
+            serial_inode = next(
+                inode for inode in range(2, 0xFFFFFFFF) if inode not in used_inodes
+            )
+            live_config_files.append(
+                ConfigFile(
+                    name=b"serial.cfg",
+                    data=serial_payload,
+                    inode=serial_inode,
+                    mode=0x81A4,
+                    uid=0,
+                    gid=0,
+                    atime=18,
+                    mtime=18,
+                    ctime=18,
+                    flags=0,
+                    dirent_mctime=1,
+                    dtype=8,
+                )
+            )
+            live_config_files.sort(key=lambda item: item.name)
+        elif live_serial.data != serial_payload:
+            raise ValidationError(
+                "Live serial.cfg content differs from the recovered serial"
+            )
+
     current_count = sum(1 for n in nodes if n["current"])
     obsolete_count = sum(1 for n in nodes if n["obsolete"])
     kind_counts = Counter(n["kind"] for n in nodes)
@@ -556,6 +949,10 @@ def extract_serial_and_config_info(config: bytes) -> dict[str, Any]:
         "serial_payload": serial_payload,
         "serial_value": serial_value,
         "serial_source": serial_source,
+        "unexpected_names": sorted(
+            name.decode("ascii", errors="replace") for name in unexpected_names
+        ),
+        "live_config_files": live_config_files,
         "non_ff_bytes": sum(byte != 0xFF for byte in config),
         "ff_bytes": config.count(0xFF),
     }
@@ -635,6 +1032,140 @@ def build_minimal_config(serial_payload: bytes) -> bytes:
     return built
 
 
+def build_preserved_config(files: Iterable[ConfigFile]) -> bytes:
+    files = tuple(sorted(files, key=lambda item: item.name))
+    if not files:
+        raise ValidationError("Preserve-data mode found no live config files")
+    if len({item.name for item in files}) != len(files):
+        raise ValidationError("Preserve-data mode found duplicate file names")
+    serials = [item.data for item in files if item.name == b"serial.cfg"]
+    if len(serials) != 1 or not serial_payload_is_valid(serials[0]):
+        raise ValidationError(
+            "Preserve-data mode requires exactly one valid serial.cfg"
+        )
+
+    output = bytearray(b"\xFF" * CONFIG_SIZE)
+    clean_header = struct.pack("<HHI", JFFS2_MAGIC, 0x2003, 12)
+    output[0:12] = clean_header + struct.pack("<I", jffs2_crc(clean_header))
+    cursor = 12
+
+    for item in files:
+        name = item.name
+        dirent_total = 40 + len(name)
+        dirent_header = struct.pack(
+            "<HHI", JFFS2_MAGIC, 0xE001, dirent_total
+        )
+        dirent_header_crc = struct.pack("<I", jffs2_crc(dirent_header))
+        dirent_fields = struct.pack(
+            "<IIII", 1, 1, item.inode, item.dirent_mctime
+        )
+        dirent_fields += struct.pack("<BBH", len(name), item.dtype, 0)
+        dirent_prefix = dirent_header + dirent_header_crc + dirent_fields
+        dirent = (
+            dirent_prefix
+            + struct.pack(
+                "<II", jffs2_crc(dirent_prefix), jffs2_crc(name)
+            )
+            + name
+        )
+        if cursor + len(dirent) > 0x4000:
+            raise ValidationError(
+                "Preserved config files do not fit the supported compact "
+                "first-eraseblock layout"
+            )
+        output[cursor : cursor + len(dirent)] = dirent
+        cursor = align4(cursor + len(dirent))
+
+        inode_total = 68 + len(item.data)
+        inode_header = struct.pack(
+            "<HHI", JFFS2_MAGIC, 0xE002, inode_total
+        )
+        inode_header_crc = struct.pack("<I", jffs2_crc(inode_header))
+        inode_fields = struct.pack(
+            "<IIIHHIIIIIIIBBH",
+            item.inode,
+            1,
+            item.mode,
+            item.uid,
+            item.gid,
+            len(item.data),
+            item.atime,
+            item.mtime,
+            item.ctime,
+            0,
+            len(item.data),
+            len(item.data),
+            0,
+            0,
+            item.flags,
+        )
+        inode_prefix = inode_header + inode_header_crc + inode_fields
+        inode = (
+            inode_prefix
+            + struct.pack(
+                "<II", jffs2_crc(item.data), jffs2_crc(inode_prefix)
+            )
+            + item.data
+        )
+        if cursor + len(inode) > 0x4000:
+            raise ValidationError(
+                "Preserved config files do not fit the supported compact "
+                "first-eraseblock layout"
+            )
+        output[cursor : cursor + len(inode)] = inode
+        cursor = align4(cursor + len(inode))
+
+    built = bytes(output)
+    parsed = extract_serial_and_config_info(
+        built,
+        allow_unknown_names=True,
+        preserve_live_files=True,
+    )
+    rebuilt_files = parsed["live_config_files"]
+    assert rebuilt_files is not None
+    expected = {
+        item.name: (
+            item.data,
+            item.inode,
+            item.mode,
+            item.uid,
+            item.gid,
+            item.atime,
+            item.mtime,
+            item.ctime,
+            item.flags,
+            item.dirent_mctime,
+            item.dtype,
+        )
+        for item in files
+    }
+    actual = {
+        item.name: (
+            item.data,
+            item.inode,
+            item.mode,
+            item.uid,
+            item.gid,
+            item.atime,
+            item.mtime,
+            item.ctime,
+            item.flags,
+            item.dirent_mctime,
+            item.dtype,
+        )
+        for item in rebuilt_files
+    }
+    if actual != expected:
+        raise ValidationError(
+            "Internal preserve-data JFFS2 round-trip validation failed"
+        )
+    if parsed["obsolete_node_count"] != 0:
+        raise ValidationError(
+            "Internal preserve-data rebuild unexpectedly contains obsolete nodes"
+        )
+    return built
+
+
 def invariant_bytes(image: bytes) -> bytes:
     return (
         image[:PATCH_START]
@@ -651,7 +1182,7 @@ def verify_confirmation_reads(
     primary_hash = sha256(primary)
 
     for path in confirmation_paths:
-        data = path.read_bytes()
+        data, source = read_image_source(path)
         if len(data) != len(primary):
             raise ValidationError(
                 f"Confirmation read {path} has {len(data)} bytes; "
@@ -671,13 +1202,23 @@ def verify_confirmation_reads(
                 "size": len(data),
                 "sha256": primary_hash,
                 "byte_identical": True,
+                "source_format": source["format"],
+                "evidenced_identical_reads": source[
+                    "evidenced_identical_reads"
+                ],
             }
         )
 
     return results
 
 
-def analyze_image(image: bytes, source_name: str = "<memory>") -> dict[str, Any]:
+def analyze_image(
+    image: bytes,
+    source_name: str = "<memory>",
+    *,
+    allow_unknown_config: bool = False,
+    preserve_config_data: bool = False,
+) -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
 
@@ -745,7 +1286,11 @@ def analyze_image(image: bytes, source_name: str = "<memory>") -> dict[str, Any]
 
     config = image[CONFIG_START:CONFIG_END]
     try:
-        config_info = extract_serial_and_config_info(config)
+        config_info = extract_serial_and_config_info(
+            config,
+            allow_unknown_names=allow_unknown_config,
+            preserve_live_files=preserve_config_data,
+        )
     except ValidationError as exc:
         errors.append(str(exc))
         config_info = None
@@ -796,6 +1341,8 @@ def analyze_image(image: bytes, source_name: str = "<memory>") -> dict[str, Any]
         "config_kind_counts": config_info["kind_counts"],
         "config_all_names": config_info["all_names"],
         "config_live_names": config_info["live_names"],
+        "config_unexpected_names": config_info["unexpected_names"],
+        "live_config_files": config_info["live_config_files"],
         "config_non_ff_bytes": config_info["non_ff_bytes"],
         "config_ff_bytes": config_info["ff_bytes"],
         "config_usage_percent": config_info["non_ff_bytes"] * 100.0 / CONFIG_SIZE,
@@ -901,6 +1448,7 @@ Current nodes:           {analysis['config_current_node_count']}
 Obsolete nodes:          {analysis['config_obsolete_node_count']}
 Names ever observed:     {', '.join(analysis['config_all_names']) or '(none)'}
 Live names:              {', '.join(analysis['config_live_names']) or '(none)'}
+Names outside clean set: {', '.join(analysis['config_unexpected_names']) or '(none)'}
 Already canonical:       {'yes' if analysis['config_is_canonical'] else 'no'}
 Canonical config SHA-256:{analysis['canonical_config_sha256']}
 {warning_block}
@@ -919,16 +1467,45 @@ def build_recovery(
     *,
     confirmation_paths: Iterable[Path],
     keep_config: bool,
+    config_mode: str,
+    wipe_unknown_config: bool,
     overwrite: bool,
     show_serial: bool,
     allow_fewer_reads: bool,
 ) -> dict[str, Any]:
     confirmation_paths = tuple(confirmation_paths)
-    image = input_path.read_bytes()
+    if config_mode not in {"clean-data", "preserve-data"}:
+        raise ValidationError(f"Unknown config mode: {config_mode}")
+    if wipe_unknown_config and config_mode != "clean-data":
+        raise ValidationError(
+            "--wipe-unknown-config is valid only with --config-mode clean-data"
+        )
+    if keep_config and (
+        config_mode != "clean-data" or wipe_unknown_config
+    ):
+        raise ValidationError(
+            "--keep-config cannot be combined with preserve-data or "
+            "--wipe-unknown-config"
+        )
+    image, input_source = read_image_source(input_path)
     confirmed_reads = verify_confirmation_reads(image, confirmation_paths)
-    analysis = analyze_image(image, str(input_path))
+    source_name = str(input_path)
+    if input_source["image_member"] is not None:
+        source_name += f"!{input_source['image_member']}"
+    analysis = analyze_image(
+        image,
+        source_name,
+        allow_unknown_config=(
+            wipe_unknown_config or config_mode == "preserve-data"
+        ),
+        preserve_config_data=config_mode == "preserve-data",
+    )
 
-    total_reads = 1 + len(confirmed_reads)
+    total_reads = max(
+        input_source["evidenced_identical_reads"],
+        1 + len(confirmed_reads),
+        *(item["evidenced_identical_reads"] for item in confirmed_reads),
+    )
     insufficient_reads = (
         total_reads < MIN_IDENTICAL_READS and analysis["exact_reference"] is None
     )
@@ -988,10 +1565,18 @@ def build_recovery(
 
     canonical_config = build_minimal_config(analysis["serial_payload"])
     if keep_config:
+        rebuilt_config = image[CONFIG_START:CONFIG_END]
         config_changed = False
+    elif config_mode == "preserve-data":
+        live_config_files = analysis["live_config_files"]
+        assert live_config_files is not None
+        rebuilt_config = build_preserved_config(live_config_files)
+        config_changed = image[CONFIG_START:CONFIG_END] != rebuilt_config
+        recovery[CONFIG_START:CONFIG_END] = rebuilt_config
     else:
-        config_changed = image[CONFIG_START:CONFIG_END] != canonical_config
-        recovery[CONFIG_START:CONFIG_END] = canonical_config
+        rebuilt_config = canonical_config
+        config_changed = image[CONFIG_START:CONFIG_END] != rebuilt_config
+        recovery[CONFIG_START:CONFIG_END] = rebuilt_config
 
     recovery_bytes = bytes(recovery)
 
@@ -1006,12 +1591,23 @@ def build_recovery(
 
     # Re-run the complete strict validator on the generated image.
     output_analysis = analyze_image(
-        recovery_bytes, source_name="generated recovery image"
+        recovery_bytes,
+        source_name="generated recovery image",
+        allow_unknown_config=config_mode == "preserve-data",
+        preserve_config_data=config_mode == "preserve-data",
     )
     if output_analysis["system_state"] != "known-bashrc-patched":
         raise ValidationError("Generated image is not in the known patched system state")
-    if not keep_config and not output_analysis["config_is_canonical"]:
+    if (
+        not keep_config
+        and config_mode == "clean-data"
+        and not output_analysis["config_is_canonical"]
+    ):
         raise ValidationError("Generated config is not canonical")
+    if recovery_bytes[CONFIG_START:CONFIG_END] != rebuilt_config:
+        raise ValidationError(
+            "Generated config differs from the selected rebuilt partition"
+        )
 
     changed_regions: list[dict[str, Any]] = []
     if patch_changed:
@@ -1037,7 +1633,7 @@ def build_recovery(
     layout_name = "cc2-camera-layout.txt"
     output_path = output_dir / output_name
     output_path.write_bytes(recovery_bytes)
-    (output_dir / "config-restored.bin").write_bytes(canonical_config)
+    (output_dir / "config-restored.bin").write_bytes(rebuilt_config)
     (output_dir / "serial.cfg").write_bytes(analysis["serial_payload"])
 
     layout = """\
@@ -1049,6 +1645,31 @@ def build_recovery(
     write_text(output_dir / layout_name, layout)
 
     tool_filename = Path(__file__).name
+    preserved_files_manifest: list[dict[str, Any]] = []
+    if config_mode == "preserve-data":
+        live_config_files = analysis["live_config_files"]
+        assert live_config_files is not None
+        preserved_files_manifest = [
+            {
+                "name_hex": item.name.hex(),
+                "name_display": item.name.decode(
+                    "ascii", errors="backslashreplace"
+                ),
+                "size": len(item.data),
+                "sha256": sha256(item.data),
+                "inode": item.inode,
+                "mode": item.mode,
+                "uid": item.uid,
+                "gid": item.gid,
+                "atime": item.atime,
+                "mtime": item.mtime,
+                "ctime": item.ctime,
+                "flags": item.flags,
+                "dirent_mctime": item.dirent_mctime,
+                "dirent_type": item.dtype,
+            }
+            for item in live_config_files
+        ]
     manifest = {
         "tool": {
             "name": tool_filename,
@@ -1056,8 +1677,23 @@ def build_recovery(
         },
         "input": {
             "filename": input_path.name,
+            "source_format": input_source["format"],
+            "image_member": input_source["image_member"],
             "size": len(image),
             "sha256": sha256(image),
+            "acquisition_evidence": {
+                key: value
+                for key, value in input_source.items()
+                if key
+                not in {
+                    "format",
+                    "image_member",
+                    "size",
+                    "sha256",
+                    "md5",
+                    "evidenced_identical_reads",
+                }
+            },
             "confirmed_reads": confirmed_reads,
             "total_identical_reads": total_reads,
             "fewer_reads_explicitly_allowed": (
@@ -1081,15 +1717,22 @@ def build_recovery(
             "config_obsolete_nodes_before": analysis[
                 "config_obsolete_node_count"
             ],
+            "config_unexpected_names_before": analysis[
+                "config_unexpected_names"
+            ],
         },
         "output": {
             "filename": output_name,
             "size": len(recovery_bytes),
             "sha256": sha256(recovery_bytes),
             "canonical_config_sha256": sha256(canonical_config),
+            "rebuilt_config_sha256": sha256(rebuilt_config),
+            "preserved_files": preserved_files_manifest,
         },
         "changed_regions": changed_regions,
         "keep_config": keep_config,
+        "config_mode": "keep-config" if keep_config else config_mode,
+        "wipe_unknown_config": wipe_unknown_config,
         "reference_full_sha256": REFERENCE_FULL_SHA256,
     }
     write_text(
@@ -1116,6 +1759,12 @@ def build_recovery(
         + f"Output SHA-256:         {sha256(recovery_bytes)}\n"
         + f"System patch changed:   {'yes' if patch_changed else 'no'}\n"
         + f"Config changed:         {'yes' if config_changed else 'no'}\n"
+        + f"Config mode:            "
+        + ("keep-config" if keep_config else config_mode)
+        + "\n"
+        + f"Unknown-name wipe:      "
+        + ("yes" if wipe_unknown_config else "no")
+        + "\n"
         + f"keep_config requested:  {'yes' if keep_config else 'no'}\n"
         + f"Changed regions:        "
         + (
@@ -1229,11 +1878,14 @@ def verify_readback(expected_path: Path, readback_path: Path) -> None:
     expected = expected_path.read_bytes()
     actual = readback_path.read_bytes()
 
-    expected_analysis = analyze_image(expected, str(expected_path))
+    expected_analysis = analyze_image(
+        expected,
+        str(expected_path),
+        allow_unknown_config=True,
+        preserve_config_data=True,
+    )
     if expected_analysis["system_state"] != "known-bashrc-patched":
         raise ValidationError("Expected image is not in the audited patched state")
-    if not expected_analysis["config_is_canonical"]:
-        raise ValidationError("Expected image does not contain canonical recovered config")
 
     if len(expected) != len(actual):
         raise ValidationError(
@@ -1242,11 +1894,13 @@ def verify_readback(expected_path: Path, readback_path: Path) -> None:
         )
 
     if expected == actual:
-        actual_analysis = analyze_image(actual, str(readback_path))
-        if (
-            actual_analysis["system_state"] != "known-bashrc-patched"
-            or not actual_analysis["config_is_canonical"]
-        ):
+        actual_analysis = analyze_image(
+            actual,
+            str(readback_path),
+            allow_unknown_config=True,
+            preserve_config_data=True,
+        )
+        if actual_analysis["system_state"] != "known-bashrc-patched":
             raise ValidationError("Readback is identical but not a valid recovery image")
         print("READBACK VERIFIED: byte-for-byte identical")
         print(f"SHA-256: {sha256(actual)}")
@@ -1301,8 +1955,11 @@ def self_test(image_path: Path | None = None) -> None:
 
     image_result = "not requested"
     if image_path is not None:
-        image = image_path.read_bytes()
-        analysis = analyze_image(image, str(image_path))
+        image, source = read_image_source(image_path)
+        source_name = str(image_path)
+        if source["image_member"] is not None:
+            source_name += f"!{source['image_member']}"
+        analysis = analyze_image(image, source_name)
         if analysis["system_state"] == "stock-unpatched":
             patched = build_system_patch_window(image)
             if sha256(patched) != PATCHED_PATCH_SHA256:
@@ -1321,12 +1978,26 @@ def self_test(image_path: Path | None = None) -> None:
 
 def cmd_analyze(args: argparse.Namespace) -> None:
     path = Path(args.image)
-    image = path.read_bytes()
+    image, source = read_image_source(path)
     confirmations = verify_confirmation_reads(
         image, [Path(item) for item in args.confirm]
     )
-    print(format_analysis(analyze_image(image, str(path)), show_serial=args.show_serial))
-    print(f"Byte-identical physical reads supplied: {1 + len(confirmations)}")
+    source_name = str(path)
+    if source["image_member"] is not None:
+        source_name += f"!{source['image_member']}"
+    print(format_analysis(analyze_image(image, source_name), show_serial=args.show_serial))
+    evidenced_reads = max(
+        source["evidenced_identical_reads"],
+        1 + len(confirmations),
+        *(item["evidenced_identical_reads"] for item in confirmations),
+    )
+    print(f"Byte-identical physical reads evidenced: {evidenced_reads}")
+    if source["format"] == USB_BACKUP_FORMAT:
+        print(
+            "  USB backup: "
+            f"{source['consecutive_identical_reads']} consecutive identical "
+            f"reads in {source['read_passes']} attempt(s)"
+        )
     for item in confirmations:
         print(f"  {item['filename']}  {item['sha256']}")
 
@@ -1343,6 +2014,8 @@ def cmd_build(args: argparse.Namespace) -> None:
         output_dir,
         confirmation_paths=[Path(item) for item in args.confirm],
         keep_config=args.keep_config,
+        config_mode=args.config_mode,
+        wipe_unknown_config=args.wipe_unknown_config,
         overwrite=args.overwrite,
         show_serial=args.show_serial,
         allow_fewer_reads=args.allow_fewer_reads,
@@ -1355,6 +2028,7 @@ def cmd_build(args: argparse.Namespace) -> None:
     print(
         f"Identical reads:  {manifest['input']['total_identical_reads']}"
     )
+    print(f"Config mode:      {manifest['config_mode']}")
     if manifest["changed_regions"]:
         print(
             "Regions to write: "
@@ -1387,7 +2061,9 @@ def build_parser() -> argparse.ArgumentParser:
     analyze = subparsers.add_parser(
         "analyze", help="validate a dump without creating a recovery image"
     )
-    analyze.add_argument("image", help="primary 8 MiB SPI-NOR dump")
+    analyze.add_argument(
+        "image", help="primary raw 8 MiB dump or cc2flash backup ZIP"
+    )
     analyze.add_argument(
         "--confirm",
         nargs="*",
@@ -1405,7 +2081,9 @@ def build_parser() -> argparse.ArgumentParser:
     build = subparsers.add_parser(
         "build", help="validate a dump and generate a recovery bundle"
     )
-    build.add_argument("image", help="primary 8 MiB SPI-NOR dump")
+    build.add_argument(
+        "image", help="primary raw 8 MiB dump or cc2flash backup ZIP"
+    )
     build.add_argument(
         "--confirm",
         nargs="*",
@@ -1422,6 +2100,24 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "leave config untouched only if it is already the exact canonical "
             "rebuild; exhausted/noncanonical config is refused"
+        ),
+    )
+    build.add_argument(
+        "--config-mode",
+        choices=("clean-data", "preserve-data"),
+        default="clean-data",
+        help=(
+            "clean-data keeps only serial.cfg and lets the next boot recreate "
+            "defaults; preserve-data recreates each live regular file once "
+            "(default: clean-data)"
+        ),
+    )
+    build.add_argument(
+        "--wipe-unknown-config",
+        action="store_true",
+        help=(
+            "with clean-data, explicitly discard CRC-valid config names "
+            "outside the audited set while still preserving serial.cfg"
         ),
     )
     build.add_argument(
@@ -1457,7 +2153,10 @@ def build_parser() -> argparse.ArgumentParser:
     test.add_argument(
         "image",
         nargs="?",
-        help="optional supported image for a complete system-patch self-test",
+        help=(
+            "optional supported raw image or cc2flash backup ZIP for a "
+            "complete system-patch self-test"
+        ),
     )
     test.set_defaults(func=cmd_self_test)
 
