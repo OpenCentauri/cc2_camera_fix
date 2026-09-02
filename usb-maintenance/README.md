@@ -228,10 +228,10 @@ the client publish `backup.zip`. The ordinary ZIP contains exactly:
 
 The manifest records the acquisition counts, hashes, partition map, boot
 fingerprint, and acceptance basis. Both members are completed and CRC-checked
-under a temporary name before one same-directory rename exposes the final ZIP,
-so an interruption cannot publish only the image or only its evidence. The
-client refuses to overwrite an existing archive. Standard ZIP tools can extract
-`flash.bin` for independent inspection.
+under a temporary name before one same-filesystem create-if-absent hard link
+exposes the final ZIP. Publication cannot replace an archive that appears
+concurrently, and an interruption cannot publish only the image or only its
+evidence. Standard ZIP tools can extract `flash.bin` for independent inspection.
 
 If ADB lists more than one device, pass the camera serial explicitly:
 
@@ -280,6 +280,11 @@ post-write status or readback. An independently available ADB or programmer
 read is therefore required for end-to-end verification. `--no-post-verify`
 gives up that assurance.
 
+`--adb-timeout` bounds only the wait for ADB to become online after normal-mode
+USB returns. Once ADB is online, stable post-write verification begins as a
+separate operation with the ordinary per-command timeouts; the option does not
+claim to bound up to five complete flash reads.
+
 Do not unplug the camera after the MD5 response.  A failed transfer before the
 MD5 check does not erase flash, but the persistent flag may leave the camera in
 bootloader mode; reconnecting the bootloader and retransmitting a full known
@@ -317,12 +322,13 @@ See [PROTOCOL.md](PROTOCOL.md) for the recovered wire formats and
 python -m unittest discover -s tests -v
 ```
 
-The 69 tests exercise the 57-entry normal command catalog, all configuration and
+The 73 tests exercise the 57-entry normal command catalog, all configuration and
 upload mappings, command builders, U-Boot frame types/ACK decoders, frame
 vectors, checksums, image headers, packet numbering, partition validation, ADB
 absence/offline/error classification, three-consecutive-of-five acquisition,
-boot-hash gating, atomic ZIP publication, strict v2 manifest parsing, both
-explicit ADB startup commands, bounded/validated timeouts, expected final-commit
+boot-hash gating, create-if-absent ZIP publication, strict v2 manifest parsing,
+unsupported-compression rejection, both explicit ADB startup commands,
+bounded/validated availability timeouts, expected final-commit
 failure/disconnection, the Windows `error: closed`
 transport handoff, legacy text-shell parsing, ordered binary MTD pulls and
 temporary-file cleanup, CLI mutation guards, and the HID

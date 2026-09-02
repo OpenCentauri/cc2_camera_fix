@@ -16,16 +16,21 @@
   `--accept-bootloader-hash <sha256>` override before any backup is published.
 - Publishes the raw image and `cc2flash-backup-v2` manifest as the two members
   of one ordinary ZIP. The completed archive is flushed, CRC-checked, and
-  exposed through one same-directory rename, eliminating the prior half-pair
-  publication window. Restore consumes the ZIP directly and rejects legacy
-  two-read manifests.
+  exposed through an atomic same-filesystem create-if-absent hard link. This
+  eliminates both the prior half-pair window and concurrent overwrite race.
+  Restore consumes the ZIP directly and rejects legacy two-read manifests.
 - Makes the ADB startup deadline bound each `get-state` subprocess and rejects
   zero, negative, infinite, and NaN durations before sending HID.
 - Type-checks untrusted manifest counters before comparison, so malformed JSON
   is rejected as a protocol error instead of escaping as `TypeError`.
-- Expanded the offline suite from 54 to 69 tests, including stability ordering,
-  hash output/override behavior, atomic ZIP publication, malformed manifests,
-  bounded timeouts, read-only backup, and separate ADB commands.
+- Rejects impossible v2 stable-read counts and unsupported ZIP compression as
+  clean protocol errors.
+- Defines restore `--adb-timeout` as the bounded online-availability wait; the
+  stable readback then runs as a separate operation under per-command timeouts.
+- Expanded the offline suite from 54 to 73 tests, including stability ordering,
+  hash output/override behavior, create-if-absent ZIP publication, malformed
+  manifests, bounded availability timeouts, read-only backup, and separate ADB
+  commands.
 
 ## v0.6.0 — temporary ADB startup through upload command
 

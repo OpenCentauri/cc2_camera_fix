@@ -727,11 +727,19 @@ that differs from the newly observed partition is rejected. The accepted v2
 manifest records whether the basis was `known-reference` or `explicit-hash`.
 The raw image and manifest are published as exactly two members of one ordinary
 ZIP, `flash.bin` and `manifest.json`. The client completes, flushes, and
-CRC-checks a same-directory temporary archive before one rename exposes the
-final `.zip`; it therefore cannot expose only one half of the image/evidence
-pair. Restore rejects additional/duplicate/encrypted members, the wrong
-advertised image size, oversized or non-object JSON, malformed counters, hash
-mismatches, and legacy manifest formats before enabling a write.
+CRC-checks a same-directory temporary archive before an atomic create-if-absent
+hard link exposes the final `.zip`. The publication step cannot overwrite a
+destination created concurrently, and it cannot expose only one half of the
+image/evidence pair. Restore rejects additional/duplicate/encrypted members,
+unsupported compression, the wrong advertised image size, oversized or
+non-object JSON, malformed or impossible counters, hash mismatches, and legacy
+manifest formats before enabling a write.
+
+After a restore returns to normal-mode USB, `--adb-timeout` bounds only the wait
+for the selected daemon to become online. The three-consecutive-read verification
+then runs as a separate phase with the normal per-command timeouts. This avoids
+misrepresenting a short ADB-availability window as a bound on as many as thirty
+partition pulls.
 
 The persistent startup hook is a solderless recovery path, but it is
 intentionally **not read-only**:

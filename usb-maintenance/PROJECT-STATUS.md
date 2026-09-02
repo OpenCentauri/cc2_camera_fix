@@ -24,8 +24,9 @@
 - Made `backup` strictly read-only. It requires three consecutive identical
   full reads within five attempts before evaluating a known boot-partition
   SHA-256 or an exact user-reviewed override.
-- Publishes `flash.bin` and `manifest.json` inside one verified ZIP through a
-  single same-directory rename; restore validates the archive directly.
+- Publishes `flash.bin` and `manifest.json` inside one verified ZIP through an
+  atomic same-filesystem create-if-absent hard link; a concurrently created
+  destination is never overwritten, and restore validates the archive directly.
 - Bounds every post-HID ADB probe by the remaining startup deadline, rejects
   invalid durations before HID, and rejects malformed manifest field types as
   ordinary protocol errors.
@@ -48,7 +49,7 @@
 
 ## Client status
 
-The included Python client is now v0.5.0 with 69 passing offline tests. Its
+The included Python client is now v0.5.0 with 73 passing offline tests. Its
 backup path is strictly read-only and requires three consecutive identical full
 reads within five attempts. Temporary and persistent ADB setup are separate
 commands rather than fallback flags on `backup`. An accepted backup is one ZIP
@@ -62,7 +63,8 @@ hardware-unverified rather than known wire-incompatible.
 The expanded tests verify exact catalog completeness, all 21 configuration
 pairs, all 13 uploader commands, all four U-Boot frame types, group-wide
 `0x4xxx` behavior, builders/decoders, stable-read/hash/archive gates, bounded
-deadline propagation, malformed-manifest rejection, the exact
+deadline propagation, post-restore availability-timeout separation,
+malformed-manifest and unsupported-ZIP rejection, the exact
 `3000 → 3110 → 3200(final) → 3300` ADB-startup upload, interactive guards, and
 the temporary command-injection transaction and the prior backup/image safety
 checks.
