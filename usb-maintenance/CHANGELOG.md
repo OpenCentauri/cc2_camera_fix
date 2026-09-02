@@ -17,7 +17,9 @@
   returns without the persistent hook, requires exact readback through the end
   of HWCONFIG, and reports config changes caused by the verification boot
   instead of incorrectly claiming a full byte-exact mismatch.
-- Expanded the offline suite from 78 to 84 tests, including allowed-region
+- Aligned hardware recovery's strict partition-manifest validation with the
+  current USB backup producer: `0x4000` erase sizes and case-insensitive names.
+- Expanded the offline suite from 78 to 83 tests, including allowed-region
   interoperability, wrong-unit rejection, offline pair planning, post-boot
   config handling, temporary ADB startup, and proof that a compatibility
   failure occurs before USB is opened.
@@ -28,8 +30,8 @@
 - Made `backup` strictly read-only. An offline camera now receives instructions
   for the separate `start-adb` or `install-adb-startup` commands; it is never
   mutated as an automatic fallback.
-- Replaced the two-read rule with three consecutive byte-identical 8 MiB reads
-  within at most five attempts, matching the repository's hardware-recovery
+- Requires three consecutive byte-identical 8 MiB reads within at most five
+  attempts, matching the repository's hardware-recovery
   minimum while allowing live JFFS2 state two additional chances to settle.
 - Added a known SHA-256 gate for the complete 256 KiB boot partition:
   `5602ec961b4410ccceea0d4910e4fa768c6998bd4ba86143ba50855bdd0b7a54`.
@@ -40,7 +42,7 @@
   of one ordinary ZIP. The completed archive is flushed, CRC-checked, and
   exposed through an atomic same-filesystem create-if-absent hard link. This
   eliminates both the prior half-pair window and concurrent overwrite race.
-  Restore consumes the ZIP directly and rejects two-read v1 manifests.
+  Restore consumes the ZIP directly.
 - Makes the ADB startup deadline bound each `get-state` subprocess and rejects
   zero, negative, infinite, and NaN durations before sending HID.
 - Type-checks untrusted manifest counters before comparison, so malformed JSON

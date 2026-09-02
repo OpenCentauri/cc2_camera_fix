@@ -18,25 +18,25 @@ Review date: 2026-09-02
 - The hardware-recovery self-test and all seven focused
   interoperability/config-mode tests pass on Python 3.12.
 
-## Attached raw USB-dump interoperability
+## Attached current USB-backup interoperability
 
-The locally supplied raw USB dump and adjacent v1 JSON were used only as
-test inputs and were not added to the repository. The raw 8 MiB image is a
-normal hardware-recovery input. Because its v1 sidecar records only two reads,
-the test used explicit reduced-read acceptance rather than representing that
-sidecar as v2 evidence.
+The locally supplied current-format ZIP was used only as a test input and was
+not added to the repository. Its manifest records three consecutive identical
+reads, the known bootloader fingerprint, and the camera's six-partition map
+with `0x4000` erase sizes.
 
+- The unmodified ZIP passed strict archive, evidence, partition-map, firmware,
+  identity, and JFFS2 validation without reduced-read overrides.
 - Default clean-data correctly refused the live unfamiliar `system.sh` name.
-- Clean-data with `--wipe-unknown-config` produced SHA-256
-  `269f1b3b205e2ac30ada7cb98a7aeb9ada2e76786dc14abe95ea9c56dce73d1f`,
-  byte-for-byte equal to the supplied hardware-recovery dump.
+- Clean-data with `--wipe-unknown-config` and preserve-data both built directly
+  from the ZIP without extraction.
 - Preserve-data retained the contents and relevant metadata of all seven live
   regular files: `dev_config.cfg`, `serial.cfg`, `system.sh`, `uvc.attr`,
   `uvc.config`, `uvc2.attr`, and `uvc_dualstream.config`.
 - The preserved config contains one cleanmarker, one dirent and one inode per
   file, and zero obsolete nodes.
 - Both generated full images passed USB maintenance's image safety checks and
-  same-camera allowed-region comparison against the supplied USB dump.
+  same-camera allowed-region comparison against `flash.bin` from the ZIP.
 
 The table below retains the earlier two-unit regression record. Unit B's clean
 output/readback equality was re-executed with the newly attached files; unit A

@@ -57,7 +57,7 @@
 
 ## Client status
 
-The included Python client is now v0.6.0 with 84 passing offline tests. Its
+The included Python client is now v0.6.0 with 83 passing offline tests. Its
 backup path is strictly read-only and requires three consecutive identical full
 reads within five attempts. Temporary and persistent ADB setup are separate
 commands rather than fallback flags on `backup`. An accepted backup is one ZIP

@@ -55,12 +55,12 @@ KNOWN_BOOTLOADER_SHA256 = (
     "5602ec961b4410ccceea0d4910e4fa768c6998bd4ba86143ba50855bdd0b7a54"
 )
 EXPECTED_USB_PARTITIONS = (
-    (0, 0x040000, 0x8000, "boot"),
-    (1, 0x150000, 0x8000, "kernel"),
-    (2, 0x158000, 0x8000, "root"),
-    (3, 0x4E8000, 0x8000, "system"),
-    (4, 0x010000, 0x8000, "hwconfig"),
-    (5, 0x020000, 0x8000, "config"),
+    (0, 0x040000, 0x4000, "boot"),
+    (1, 0x150000, 0x4000, "kernel"),
+    (2, 0x158000, 0x4000, "root"),
+    (3, 0x4E8000, 0x4000, "system"),
+    (4, 0x010000, 0x4000, "hwconfig"),
+    (5, 0x020000, 0x4000, "config"),
 )
 
 # The HWCONFIG record contains a unit-specific two-byte check value and a
@@ -275,12 +275,15 @@ def _validate_usb_backup_manifest(manifest: Any, image: bytes) -> dict[str, Any]
     for item, (index, size, erase_size, name) in zip(
         partitions, EXPECTED_USB_PARTITIONS
     ):
-        if not isinstance(item, dict) or item != {
-            "index": index,
-            "size": size,
-            "erase_size": erase_size,
-            "name": name,
-        }:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"index", "size", "erase_size", "name"}
+            or item.get("index") != index
+            or item.get("size") != size
+            or item.get("erase_size") != erase_size
+            or not isinstance(item.get("name"), str)
+            or item["name"].casefold() != name
+        ):
             raise ValidationError("USB backup manifest has an invalid partition map")
 
     return {

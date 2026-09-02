@@ -158,11 +158,7 @@ python3 cc2_sig_tool.py build backup.zip --config-mode preserve-data
 
 Raw 8 MiB backups are first-class inputs. For a bricked camera, raw dumps made
 with an external programmer are the only acquisition path; supply three stable
-reads with `--confirm` as described below. A USB export may consist of a raw
-`.bin` plus `cc2flash-backup-v1` JSON. The raw image remains valid input, but
-that two-read JSON is not accepted as three-read evidence. Supply independent
-confirmation dumps or use `--allow-fewer-reads`; the tool does not upgrade or
-invent missing acquisition evidence.
+reads with `--confirm` as described below.
 
 Build a recovery bundle and require three physical reads to be byte-identical:
 

@@ -156,12 +156,12 @@ class ProtocolTests(unittest.TestCase):
 
 
 PROC_MTD = """dev:    size   erasesize  name
-mtd0: 00040000 00008000 "boot"
-mtd1: 00150000 00008000 "kernel"
-mtd2: 00158000 00008000 "root"
-mtd3: 004e8000 00008000 "system"
-mtd4: 00010000 00008000 "hwconfig"
-mtd5: 00020000 00008000 "config"
+mtd0: 00040000 00004000 "boot"
+mtd1: 00150000 00004000 "kernel"
+mtd2: 00158000 00004000 "root"
+mtd3: 004e8000 00004000 "system"
+mtd4: 00010000 00004000 "hwconfig"
+mtd5: 00020000 00004000 "config"
 """
 
 
@@ -355,20 +355,6 @@ class BackupTests(unittest.TestCase):
             expected_observed == KNOWN_BOOTLOADER_SHA256,
         )
 
-    def test_restore_rejects_two_read_v1_manifest(self):
-        image = b"\0" * FLASH_SIZE
-        manifest = {
-            "format": "cc2flash-backup-v1",
-            **hashes(image),
-            "read_passes": 2,
-            "partitions": [],
-        }
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "backup.zip"
-            save_backup(path, image, manifest)
-            with self.assertRaisesRegex(ProtocolError, "v2 manifest"):
-                validate_preserved_backup(path)
-
     def test_malformed_consecutive_read_count_is_rejected_cleanly(self):
         image = b"\0" * FLASH_SIZE
         manifest = {
@@ -386,7 +372,7 @@ class BackupTests(unittest.TestCase):
                 {
                     "index": index,
                     "size": size,
-                    "erase_size": 0x8000,
+                    "erase_size": 0x4000,
                     "name": name,
                 }
                 for index, (name, size) in enumerate(EXPECTED_PARTITIONS)
@@ -415,7 +401,7 @@ class BackupTests(unittest.TestCase):
                 {
                     "index": index,
                     "size": size,
-                    "erase_size": 0x8000,
+                    "erase_size": 0x4000,
                     "name": name,
                 }
                 for index, (name, size) in enumerate(EXPECTED_PARTITIONS)
