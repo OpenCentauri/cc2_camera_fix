@@ -304,9 +304,10 @@ require the literal confirmation `RESTORE-CC2`. Its planned phases are:
 4. Transfer a 128-byte update header plus the image in numbered packets.
 5. Require the bootloader's whole-image MD5 success indication.
 6. Wait without removing power while the bootloader erases, writes, and reboots.
-7. Ensure root ADB is online, starting `/bin/adbd` temporarily through normal
-   HID if the rebuilt config did not retain a startup hook; then acquire three
-   consecutive identical flash images over ADB.
+7. Ensure root ADB is online. If it is offline, ask interactively whether to
+   start `/bin/adbd` temporarily through normal HID; only an explicit `y` or
+   `yes` sends that command. Then acquire three consecutive identical flash
+   images over ADB.
 8. Require every boot-stable byte from `0x000000` through the end of HWCONFIG at
    `0x7dffff` to match `fixed.bin`. Report whether config also stayed exact;
    clean-data images legitimately create default config files during this boot.
@@ -315,6 +316,12 @@ The bootloader reports MD5 acceptance **before** erase/write and offers no
 post-write status or readback. An independently available ADB or programmer
 read is therefore required for end-to-end verification. `--no-post-verify`
 gives up that assurance.
+
+Consent to the flash write and consent to start ADB are separate. `restore
+--yes` skips only the typed `RESTORE-CC2` write confirmation. It does not answer
+the later ADB question. Empty or negative input, and non-interactive stdin, send
+no ADB-start HID command and leave the completed restore explicitly
+unverified.
 
 `--adb-timeout` bounds only the wait for ADB to become online after normal-mode
 USB returns. Once ADB is online, stable post-write verification begins as a

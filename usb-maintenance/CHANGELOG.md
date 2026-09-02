@@ -13,11 +13,14 @@
   restore guard compares actual bytes, not only filenames or unit identifiers.
 - Documented the complete
   `cc2flash backup → cc2_sig_tool build → cc2flash restore` workflow.
-- Post-restore verification now starts ADB temporarily when a clean config
-  returns without the persistent hook, requires exact readback through the end
-  of HWCONFIG, and reports config changes caused by the verification boot
-  instead of incorrectly claiming a full byte-exact mismatch.
-- Expanded the offline suite from 78 to 83 tests, including allowed-region
+- Post-restore verification now asks for separate interactive consent before
+  starting ADB temporarily when a clean config returns without the persistent
+  hook. Restore `--yes` does not bypass this prompt; declined and non-interactive
+  invocations send no ADB-start HID command. Successful readback requires an
+  exact match through the end of HWCONFIG and reports config changes caused by
+  the verification boot instead of incorrectly claiming a full byte-exact
+  mismatch.
+- Expanded the offline suite from 78 to 85 tests, including allowed-region
   interoperability, wrong-unit rejection, offline pair planning, post-boot
   config handling, temporary ADB startup, and proof that a compatibility
   failure occurs before USB is opened.

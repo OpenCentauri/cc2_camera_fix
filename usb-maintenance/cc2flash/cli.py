@@ -307,6 +307,26 @@ def _confirm(image_path: Path, image_hashes: dict, backup_path: Path) -> None:
         raise ProtocolError("confirmation did not match; nothing was written")
 
 
+def _confirm_temporary_adb_for_readback() -> None:
+    """Require separate consent before starting adbd after a restore."""
+
+    if not sys.stdin.isatty():
+        raise ProtocolError(
+            "ADB is offline after restore; temporary ADB startup requires an "
+            "interactive confirmation. No HID ADB-start command was sent, and "
+            "the restore is not post-verified"
+        )
+    answer = input(
+        "ADB is offline after restore. Start /bin/adbd temporarily through "
+        "normal HID for post-write readback? [y/N] "
+    )
+    if answer.strip().casefold() not in {"y", "yes"}:
+        raise ProtocolError(
+            "temporary ADB startup was declined. No HID ADB-start command was "
+            "sent, and the restore is not post-verified"
+        )
+
+
 def command_restore(args) -> int:
     image_path = Path(args.image)
     backup_path = Path(args.backup)
@@ -349,14 +369,17 @@ def command_restore(args) -> int:
     )
     adb = _adb(args)
     try:
+        adb.ensure_available()
+    except AdbUnavailable:
+        _confirm_temporary_adb_for_readback()
         try:
-            adb.ensure_available()
-        except AdbUnavailable:
-            print(
-                "ADB is offline after restore; starting /bin/adbd temporarily "
-                "through normal HID for readback."
-            )
             start_adb_through_upload_command()
+        except ProtocolError as exc:
+            raise ProtocolError(
+                "normal HID returned, but the explicitly confirmed temporary "
+                "ADB start failed; write is not post-verified"
+            ) from exc
+    try:
         # --adb-timeout deliberately bounds only the transition to an online
         # daemon. Stable acquisition is a separate operation: each pull keeps
         # its normal command timeout and no completed read is discarded merely

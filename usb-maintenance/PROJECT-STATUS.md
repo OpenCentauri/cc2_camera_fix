@@ -51,13 +51,14 @@
   generated image matches that same camera outside the two audited edit
   regions.
 - Made post-write verification compatible with both hardware-recovery config
-  modes: it can start ADB temporarily after a clean-data boot, requires an exact
-  match through HWCONFIG, and separately reports config changes made by that
-  boot.
+  modes: after a clean-data boot it separately prompts for permission to start
+  ADB temporarily, requires an exact match through HWCONFIG, and separately
+  reports config changes made by that boot. It never treats restore `--yes` as
+  consent to start ADB.
 
 ## Client status
 
-The included Python client is now v0.6.0 with 83 passing offline tests. Its
+The included Python client is now v0.6.0 with 85 passing offline tests. Its
 backup path is strictly read-only and requires three consecutive identical full
 reads within five attempts. Temporary and persistent ADB setup are separate
 commands rather than fallback flags on `backup`. An accepted backup is one ZIP
@@ -87,7 +88,8 @@ malformed-manifest, JSON decoder-limit, unsupported-ZIP, and corrupt
 compressed-member rejection,
 hard failure on a hung ADB subprocess, the exact
 `3000 → 3110 → 3200(final) → 3300` ADB-startup upload, interactive guards, and
-the temporary command-injection transaction and the prior backup/image safety
+proof that declined or non-interactive post-restore prompts send no HID command,
+the temporary command-injection transaction, and the prior backup/image safety
 checks.
 
 Without any setup, the stock USB gadget always enumerates an ADB transport as
