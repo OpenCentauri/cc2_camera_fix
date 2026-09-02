@@ -15,9 +15,10 @@ from .adb_backup import (
     AdbUnavailable,
     acquire_stable,
     hashes,
+    load_preserved_backup,
     save_backup,
     validate_backup_archive_path,
-    validate_preserved_backup,
+    validate_replacement_against_backup,
 )
 from .hid_transport import (
     ADB_STARTUP_CONTENT,
@@ -264,14 +265,25 @@ def command_install_adb_startup(args) -> int:
 
 
 def command_plan(args) -> int:
-    image = Path(args.image).read_bytes()
+    image_path = Path(args.image)
+    image = image_path.read_bytes()
     validate_full_restore_image(image)
+    backup_path = Path(args.backup) if args.backup else None
+    backup_hashes = None
+    if backup_path is not None:
+        backup_image, backup_hashes = load_preserved_backup(backup_path)
+        validate_replacement_against_backup(image, backup_image)
     blob, plan = build_update_blob(image)
     result = {
-        "image": str(Path(args.image)),
+        "image": str(image_path),
         "image_size": len(image),
         "image_sha256": hashlib.sha256(image).hexdigest(),
         "image_md5": hashlib.md5(image).hexdigest(),
+        "preserved_backup": str(backup_path) if backup_path else None,
+        "preserved_backup_sha256": (
+            backup_hashes["sha256"] if backup_hashes else None
+        ),
+        "preserved_backup_compatible": backup_path is not None,
         "flash_offset": plan.flash_offset,
         "transfer_size": plan.transfer_size,
         "packets": plan.packet_count,
@@ -297,9 +309,10 @@ def _confirm(image_path: Path, image_hashes: dict, backup_path: Path) -> None:
 def command_restore(args) -> int:
     image_path = Path(args.image)
     backup_path = Path(args.backup)
-    backup_hashes = validate_preserved_backup(backup_path)
+    backup_image, backup_hashes = load_preserved_backup(backup_path)
     image = image_path.read_bytes()
     validate_full_restore_image(image)
+    validate_replacement_against_backup(image, backup_image)
     image_hashes = hashes(image)
     if image_hashes["sha256"] == backup_hashes["sha256"]:
         print("Note: replacement image is byte-identical to the preserved backup.")
@@ -428,6 +441,13 @@ def parser() -> argparse.ArgumentParser:
 
     plan = commands.add_parser("plan-restore", help="validate and describe an image; no USB writes")
     plan.add_argument("image")
+    plan.add_argument(
+        "--backup",
+        help=(
+            "preserved cc2flash ZIP; also prove the image differs only in "
+            "hardware-recovery's audited regions"
+        ),
+    )
     plan.set_defaults(func=command_plan)
 
     restore = commands.add_parser("restore", parents=[common], help="restore one full 8 MiB image")

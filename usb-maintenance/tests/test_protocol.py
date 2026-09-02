@@ -26,11 +26,13 @@ from cc2flash.adb_backup import (
     acquire_stable,
     bootloader_reference,
     hashes,
+    load_preserved_backup,
     parse_proc_mtd,
     save_backup,
     validate_backup_archive_path,
     validate_partition_map,
     validate_preserved_backup,
+    validate_replacement_against_backup,
 )
 from cc2flash import cli
 from cc2flash import hid_transport
@@ -219,6 +221,22 @@ class BackupTests(unittest.TestCase):
     def test_backup_requires_zip_destination(self):
         with self.assertRaisesRegex(ProtocolError, "must be a .zip"):
             validate_backup_archive_path(Path("backup.bin"))
+
+    def test_hardware_recovery_regions_are_restore_compatible(self):
+        preserved = b"\0" * FLASH_SIZE
+        replacement = bytearray(preserved)
+        replacement[0x463000] ^= 0xFF
+        replacement[0x46AFFF] ^= 0xFF
+        replacement[0x7E0000] ^= 0xFF
+        replacement[0x7FFFFF] ^= 0xFF
+        validate_replacement_against_backup(bytes(replacement), preserved)
+
+    def test_restore_rejects_difference_outside_recovery_regions(self):
+        preserved = b"\0" * FLASH_SIZE
+        replacement = bytearray(preserved)
+        replacement[0x7D2011] = 1
+        with self.assertRaisesRegex(ProtocolError, "0x7d2011.*wrong-unit"):
+            validate_replacement_against_backup(bytes(replacement), preserved)
 
     def test_failed_archive_publish_leaves_no_final_or_half_backup(self):
         image = b"\0" * FLASH_SIZE
@@ -903,6 +921,78 @@ class CliAdbWorkflowTests(unittest.TestCase):
         self.assertIn("cc2flash start-adb", error)
         self.assertIn("cc2flash install-adb-startup", error)
 
+    def test_plan_restore_can_prove_preserved_backup_compatibility(self):
+        image = b"replacement image"
+        plan = SimpleNamespace(
+            flash_offset=0,
+            transfer_size=len(image),
+            packet_count=1,
+            packet_payload_size=1024,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            image_path = Path(directory) / "replacement.bin"
+            image_path.write_bytes(image)
+            args = SimpleNamespace(
+                image=str(image_path),
+                backup="backup.zip",
+            )
+            output = io.StringIO()
+            with (
+                mock.patch.object(cli, "validate_full_restore_image"),
+                mock.patch.object(
+                    cli,
+                    "load_preserved_backup",
+                    return_value=(image, {"sha256": "preserved-hash"}),
+                ),
+                mock.patch.object(
+                    cli, "validate_replacement_against_backup"
+                ) as compatible,
+                mock.patch.object(
+                    cli, "build_update_blob", return_value=(b"blob", plan)
+                ),
+                redirect_stdout(output),
+            ):
+                status = cli.command_plan(args)
+        self.assertEqual(status, 0)
+        compatible.assert_called_once_with(image, image)
+        result = json.loads(output.getvalue())
+        self.assertTrue(result["preserved_backup_compatible"])
+        self.assertEqual(result["preserved_backup_sha256"], "preserved-hash")
+
+    def test_restore_refuses_wrong_unit_before_opening_usb(self):
+        image = b"replacement image"
+        with tempfile.TemporaryDirectory() as directory:
+            image_path = Path(directory) / "replacement.bin"
+            image_path.write_bytes(image)
+            args = SimpleNamespace(
+                image=str(image_path),
+                backup="backup.zip",
+                yes=True,
+                enumeration_timeout=30,
+                reboot_timeout=180,
+                no_post_verify=True,
+                adb_timeout=60,
+                adb="adb",
+                serial=None,
+            )
+            with (
+                mock.patch.object(
+                    cli,
+                    "load_preserved_backup",
+                    return_value=(b"preserved image", {"sha256": "preserved-hash"}),
+                ),
+                mock.patch.object(cli, "validate_full_restore_image"),
+                mock.patch.object(
+                    cli,
+                    "validate_replacement_against_backup",
+                    side_effect=ProtocolError("wrong-unit image"),
+                ),
+                mock.patch.object(cli, "enter_bootloader") as enter,
+                self.assertRaisesRegex(ProtocolError, "wrong-unit"),
+            ):
+                cli.command_restore(args)
+        enter.assert_not_called()
+
     def test_backup_rejects_non_zip_output_before_camera_read(self):
         with (
             mock.patch.object(cli, "acquire_stable") as acquire,
@@ -1134,10 +1224,11 @@ class CliAdbWorkflowTests(unittest.TestCase):
             with (
                 mock.patch.object(
                     cli,
-                    "validate_preserved_backup",
-                    return_value={"sha256": "different"},
+                    "load_preserved_backup",
+                    return_value=(image, {"sha256": "different"}),
                 ),
                 mock.patch.object(cli, "validate_full_restore_image"),
+                mock.patch.object(cli, "validate_replacement_against_backup"),
                 mock.patch.object(
                     cli, "build_update_blob", return_value=(b"blob", plan)
                 ),

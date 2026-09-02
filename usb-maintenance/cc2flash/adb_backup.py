@@ -66,6 +66,14 @@ BACKUP_ARCHIVE_MEMBERS = frozenset(
 )
 MAX_MANIFEST_SIZE = 1024 * 1024
 
+# hardware-recovery/cc2_sig_tool.py is intentionally allowed to change only
+# its audited SquashFS window and the writable config partition.  Restore uses
+# these boundaries to prove that a candidate still belongs to the camera whose
+# preserved USB backup authorizes the write.
+HARDWARE_RECOVERY_PATCH_START = 0x463000
+HARDWARE_RECOVERY_PATCH_END = 0x46B000
+HARDWARE_RECOVERY_CONFIG_START = 0x7E0000
+
 
 @dataclass(frozen=True)
 class MtdPartition:
@@ -492,7 +500,9 @@ def save_backup(path: Path, image: bytes, manifest: dict) -> Path:
     return path
 
 
-def validate_preserved_backup(path: Path) -> dict[str, str | int]:
+def load_preserved_backup(
+    path: Path,
+) -> tuple[bytes, dict[str, str | int]]:
     if not path.is_file():
         raise ProtocolError(f"preserved backup does not exist: {path}")
     validate_backup_archive_path(path)
@@ -583,4 +593,42 @@ def validate_preserved_backup(path: Path) -> dict[str, str | int]:
     except (TypeError, ValueError) as exc:
         raise ProtocolError("preserved backup manifest partition map is invalid") from exc
     validate_partition_map(parts)
+    return data, result
+
+
+def validate_preserved_backup(path: Path) -> dict[str, str | int]:
+    """Validate a preserved backup while retaining the historical hash API."""
+
+    _data, result = load_preserved_backup(path)
     return result
+
+
+def validate_replacement_against_backup(
+    replacement: bytes, preserved: bytes
+) -> None:
+    """Require a restore image to be the same unit plus audited recovery edits."""
+
+    if len(replacement) != FLASH_SIZE or len(preserved) != FLASH_SIZE:
+        raise ProtocolError(
+            "replacement and preserved backup must both be exactly 8 MiB"
+        )
+    immutable_ranges = (
+        (0, HARDWARE_RECOVERY_PATCH_START),
+        (HARDWARE_RECOVERY_PATCH_END, HARDWARE_RECOVERY_CONFIG_START),
+    )
+    for start, end in immutable_ranges:
+        if replacement[start:end] == preserved[start:end]:
+            continue
+        relative = next(
+            index
+            for index, (candidate, original) in enumerate(
+                zip(replacement[start:end], preserved[start:end])
+            )
+            if candidate != original
+        )
+        offset = start + relative
+        raise ProtocolError(
+            "replacement image differs from the preserved backup outside "
+            "hardware-recovery's audited patch/config regions at "
+            f"0x{offset:06x}; refusing a possible wrong-unit or unsupported image"
+        )
