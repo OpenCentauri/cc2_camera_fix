@@ -49,7 +49,7 @@
 
 ## Client status
 
-The included Python client is now v0.5.0 with 73 passing offline tests. Its
+The included Python client is now v0.5.0 with 76 passing offline tests. Its
 backup path is strictly read-only and requires three consecutive identical full
 reads within five attempts. Temporary and persistent ADB setup are separate
 commands rather than fallback flags on `backup`. An accepted backup is one ZIP
@@ -64,7 +64,8 @@ The expanded tests verify exact catalog completeness, all 21 configuration
 pairs, all 13 uploader commands, all four U-Boot frame types, group-wide
 `0x4xxx` behavior, builders/decoders, stable-read/hash/archive gates, bounded
 deadline propagation, post-restore availability-timeout separation,
-malformed-manifest and unsupported-ZIP rejection, the exact
+malformed-manifest, unsupported-ZIP, and corrupt compressed-member rejection,
+hard failure on a hung ADB subprocess, the exact
 `3000 → 3110 → 3200(final) → 3300` ADB-startup upload, interactive guards, and
 the temporary command-injection transaction and the prior backup/image safety
 checks.

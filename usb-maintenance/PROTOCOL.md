@@ -680,8 +680,9 @@ The client therefore polls the selected device until it is online, tolerating
 only absent, stock `offline`, and exact `error: closed` transition states within
 the bounded startup timeout. Each `adb get-state` subprocess is capped at the
 remaining deadline; non-positive, infinite, and NaN durations are rejected
-before HID is sent. The command validates root ADB and exits; the user then runs
-the separate, strictly read-only `backup` command.
+before HID is sent. An ADB subprocess timeout is a hard failure rather than a
+fourth retryable transition state. The command validates root ADB and exits;
+the user then runs the separate, strictly read-only `backup` command.
 
 No persistent startup file is created. The handler still executes `sync` after
 the shell command, so normal firmware writes already pending against JFFS2 may
