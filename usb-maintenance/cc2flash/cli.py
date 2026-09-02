@@ -18,6 +18,7 @@ from .adb_backup import (
     load_preserved_backup,
     save_backup,
     validate_backup_archive_path,
+    validate_post_restore_readback,
     validate_replacement_against_backup,
 )
 from .hid_transport import (
@@ -348,6 +349,14 @@ def command_restore(args) -> int:
     )
     adb = _adb(args)
     try:
+        try:
+            adb.ensure_available()
+        except AdbUnavailable:
+            print(
+                "ADB is offline after restore; starting /bin/adbd temporarily "
+                "through normal HID for readback."
+            )
+            start_adb_through_upload_command()
         # --adb-timeout deliberately bounds only the transition to an online
         # daemon. Stable acquisition is a separate operation: each pull keeps
         # its normal command timeout and no completed read is discarded merely
@@ -365,12 +374,18 @@ def command_restore(args) -> int:
             "ADB became available, but stable post-write readback failed; "
             f"write is not post-verified: {exc}"
         ) from exc
-    if verified != image:
-        raise ProtocolError("post-write flash readback differs from the replacement image")
-    print(
-        "Restore complete: three consecutive post-write reads exactly match "
-        "the input image."
-    )
+    config_exact = validate_post_restore_readback(image, verified)
+    if config_exact:
+        print(
+            "Restore complete: three consecutive post-write reads exactly "
+            "match the input image."
+        )
+    else:
+        print(
+            "Restore complete: three consecutive post-write reads match every "
+            "boot-stable byte through HWCONFIG. Config changed during the "
+            "required verification boot and was not claimed byte-exact."
+        )
     print(f"SHA256: {image_hashes['sha256']}")
     return 0
 

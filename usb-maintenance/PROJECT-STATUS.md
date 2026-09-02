@@ -50,10 +50,14 @@
   the preserved USB ZIP, while `plan-restore --backup` and `restore` prove the
   generated image matches that same camera outside the two audited edit
   regions.
+- Made post-write verification compatible with both hardware-recovery config
+  modes: it can start ADB temporarily after a clean-data boot, requires an exact
+  match through HWCONFIG, and separately reports config changes made by that
+  boot.
 
 ## Client status
 
-The included Python client is now v0.6.0 with 82 passing offline tests. Its
+The included Python client is now v0.6.0 with 84 passing offline tests. Its
 backup path is strictly read-only and requires three consecutive identical full
 reads within five attempts. Temporary and persistent ADB setup are separate
 commands rather than fallback flags on `backup`. An accepted backup is one ZIP
@@ -69,6 +73,11 @@ the validated preserved ZIP. Only hardware recovery's exact SquashFS patch
 window and config partition may differ. This rejects a wrong-camera recovery
 image or unsupported additional edits. The same check is available read-only
 through `plan-restore --backup`.
+
+After restore, the client acquires another three consecutive reads. All bytes
+through `0x7dffff` must match the candidate exactly. The writable config
+partition is compared and reported separately because the first successful
+clean-data boot recreates missing defaults before ADB can read it back.
 
 The expanded tests verify exact catalog completeness, all 21 configuration
 pairs, all 13 uploader commands, all four U-Boot frame types, group-wide

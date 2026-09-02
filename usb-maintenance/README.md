@@ -304,8 +304,12 @@ require the literal confirmation `RESTORE-CC2`. Its planned phases are:
 4. Transfer a 128-byte update header plus the image in numbered packets.
 5. Require the bootloader's whole-image MD5 success indication.
 6. Wait without removing power while the bootloader erases, writes, and reboots.
-7. If ADB is available, acquire three consecutive identical flash images over
-   ADB and compare the accepted image with `fixed.bin` byte for byte.
+7. Ensure root ADB is online, starting `/bin/adbd` temporarily through normal
+   HID if the rebuilt config did not retain a startup hook; then acquire three
+   consecutive identical flash images over ADB.
+8. Require every boot-stable byte from `0x000000` through the end of HWCONFIG at
+   `0x7dffff` to match `fixed.bin`. Report whether config also stayed exact;
+   clean-data images legitimately create default config files during this boot.
 
 The bootloader reports MD5 acceptance **before** erase/write and offers no
 post-write status or readback. An independently available ADB or programmer
@@ -354,14 +358,15 @@ See [PROTOCOL.md](PROTOCOL.md) for the recovered wire formats and
 python -m unittest discover -s tests -v
 ```
 
-The 82 tests exercise the 57-entry normal command catalog, all configuration and
+The 84 tests exercise the 57-entry normal command catalog, all configuration and
 upload mappings, command builders, U-Boot frame types/ACK decoders, frame
 vectors, checksums, image headers, packet numbering, partition validation, ADB
 absence/offline/error classification, three-consecutive-of-five acquisition,
 boot-hash gating, create-if-absent ZIP publication, strict v2 manifest parsing
 including JSON decoder-limit failures,
 unsupported-compression rejection, both explicit ADB startup commands,
-hardware-recovery region compatibility and pre-USB wrong-unit rejection,
+hardware-recovery region compatibility, boot-stable post-write comparison,
+temporary ADB startup after a clean-data restore, and pre-USB wrong-unit rejection,
 bounded/validated availability timeouts, expected final-commit
 failure/disconnection, the Windows `error: closed`
 transport handoff, legacy text-shell parsing, ordered binary MTD pulls and

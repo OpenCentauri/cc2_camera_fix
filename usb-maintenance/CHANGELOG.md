@@ -13,9 +13,14 @@
   restore guard compares actual bytes, not only filenames or unit identifiers.
 - Documented the complete
   `cc2flash backup → cc2_sig_tool build → cc2flash restore` workflow.
-- Expanded the offline suite from 78 to 82 tests, including allowed-region
-  interoperability, wrong-unit rejection, offline pair planning, and proof that
-  a compatibility failure occurs before USB is opened.
+- Post-restore verification now starts ADB temporarily when a clean config
+  returns without the persistent hook, requires exact readback through the end
+  of HWCONFIG, and reports config changes caused by the verification boot
+  instead of incorrectly claiming a full byte-exact mismatch.
+- Expanded the offline suite from 78 to 84 tests, including allowed-region
+  interoperability, wrong-unit rejection, offline pair planning, post-boot
+  config handling, temporary ADB startup, and proof that a compatibility
+  failure occurs before USB is opened.
 
 ## v0.7.0 — read-only backup and stable boot fingerprint
 

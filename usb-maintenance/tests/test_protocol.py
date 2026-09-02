@@ -31,6 +31,7 @@ from cc2flash.adb_backup import (
     save_backup,
     validate_backup_archive_path,
     validate_partition_map,
+    validate_post_restore_readback,
     validate_preserved_backup,
     validate_replacement_against_backup,
 )
@@ -237,6 +238,18 @@ class BackupTests(unittest.TestCase):
         replacement[0x7D2011] = 1
         with self.assertRaisesRegex(ProtocolError, "0x7d2011.*wrong-unit"):
             validate_replacement_against_backup(bytes(replacement), preserved)
+
+    def test_post_restore_allows_only_live_config_changes(self):
+        expected = b"\0" * FLASH_SIZE
+        actual = bytearray(expected)
+        actual[0x7E0000] = 1
+        self.assertFalse(
+            validate_post_restore_readback(expected, bytes(actual))
+        )
+        self.assertTrue(validate_post_restore_readback(expected, expected))
+        actual[0x7DFFFF] = 1
+        with self.assertRaisesRegex(ProtocolError, "0x7dffff"):
+            validate_post_restore_readback(expected, bytes(actual))
 
     def test_failed_archive_publish_leaves_no_final_or_half_backup(self):
         image = b"\0" * FLASH_SIZE
@@ -1239,12 +1252,66 @@ class CliAdbWorkflowTests(unittest.TestCase):
                 mock.patch.object(
                     cli, "acquire_stable", return_value=(image, {})
                 ) as acquire,
+                mock.patch.object(
+                    cli, "validate_post_restore_readback", return_value=True
+                ) as validate_readback,
                 redirect_stdout(io.StringIO()),
             ):
                 status = cli.command_restore(args)
         self.assertEqual(status, 0)
         fake_adb.wait_for_device.assert_called_once_with(timeout=7)
         acquire.assert_called_once_with(fake_adb, progress=cli._read_progress)
+        validate_readback.assert_called_once_with(image, image)
+
+    def test_restore_starts_temporary_adb_when_clean_config_boots_offline(self):
+        image = b"replacement image"
+        fake_adb = mock.Mock()
+        fake_adb.ensure_available.side_effect = AdbUnavailable("device offline")
+        plan = mock.sentinel.plan
+        with tempfile.TemporaryDirectory() as directory:
+            image_path = Path(directory) / "replacement.bin"
+            image_path.write_bytes(image)
+            args = SimpleNamespace(
+                image=str(image_path),
+                backup="backup.zip",
+                yes=True,
+                enumeration_timeout=30,
+                reboot_timeout=180,
+                no_post_verify=False,
+                adb_timeout=7,
+                adb="adb",
+                serial=None,
+            )
+            with (
+                mock.patch.object(
+                    cli,
+                    "load_preserved_backup",
+                    return_value=(image, {"sha256": "different"}),
+                ),
+                mock.patch.object(cli, "validate_full_restore_image"),
+                mock.patch.object(cli, "validate_replacement_against_backup"),
+                mock.patch.object(
+                    cli, "build_update_blob", return_value=(b"blob", plan)
+                ),
+                mock.patch.object(cli, "enter_bootloader"),
+                mock.patch.object(cli, "wait_for_hid"),
+                mock.patch.object(cli, "restore_blob"),
+                mock.patch.object(cli, "_adb", return_value=fake_adb),
+                mock.patch.object(
+                    cli, "acquire_stable", return_value=(image, {})
+                ),
+                mock.patch.object(
+                    cli, "validate_post_restore_readback", return_value=True
+                ),
+                mock.patch.object(
+                    cli, "start_adb_through_upload_command"
+                ) as start_adb,
+                redirect_stdout(io.StringIO()),
+            ):
+                status = cli.command_restore(args)
+        self.assertEqual(status, 0)
+        start_adb.assert_called_once_with()
+        fake_adb.wait_for_device.assert_called_once_with(timeout=7)
 
 
 if __name__ == "__main__":

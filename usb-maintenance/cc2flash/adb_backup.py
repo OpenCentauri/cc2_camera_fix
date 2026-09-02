@@ -632,3 +632,37 @@ def validate_replacement_against_backup(
             "hardware-recovery's audited patch/config regions at "
             f"0x{offset:06x}; refusing a possible wrong-unit or unsupported image"
         )
+
+
+def validate_post_restore_readback(expected: bytes, actual: bytes) -> bool:
+    """Verify every boot-stable byte; return whether config also stayed exact.
+
+    The camera boots before ADB can read it. Its startup scripts may legitimately
+    append JFFS2 nodes in config, including the five defaults intentionally
+    omitted by hardware recovery. Boot through HWCONFIG must remain exact.
+    """
+
+    if len(expected) != FLASH_SIZE or len(actual) != FLASH_SIZE:
+        raise ProtocolError(
+            "expected image and post-write readback must both be exactly 8 MiB"
+        )
+    if expected[:HARDWARE_RECOVERY_CONFIG_START] != actual[
+        :HARDWARE_RECOVERY_CONFIG_START
+    ]:
+        offset = next(
+            index
+            for index, (wanted, observed) in enumerate(
+                zip(
+                    expected[:HARDWARE_RECOVERY_CONFIG_START],
+                    actual[:HARDWARE_RECOVERY_CONFIG_START],
+                )
+            )
+            if wanted != observed
+        )
+        raise ProtocolError(
+            "post-write flash readback differs from the replacement image in "
+            f"a boot-stable region at 0x{offset:06x}"
+        )
+    return expected[HARDWARE_RECOVERY_CONFIG_START:] == actual[
+        HARDWARE_RECOVERY_CONFIG_START:
+    ]
