@@ -535,7 +535,7 @@ def validate_preserved_backup(path: Path) -> dict[str, str | int]:
     result = hashes(data)
     try:
         manifest = json.loads(manifest_bytes.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
         raise ProtocolError("preserved backup manifest is unreadable") from exc
     if not isinstance(manifest, dict):
         raise ProtocolError("preserved backup manifest must be a JSON object")

@@ -448,6 +448,30 @@ class BackupTests(unittest.TestCase):
             ):
                 validate_preserved_backup(path)
 
+    def test_overlong_json_integer_is_rejected_cleanly(self):
+        image = b"\0" * FLASH_SIZE
+        integer_digits = sys.get_int_max_str_digits() + 1
+        manifest_bytes = b'{"value":' + b"1" * integer_digits + b"}"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "backup.zip"
+            with zipfile.ZipFile(path, mode="w") as archive:
+                archive.writestr(BACKUP_IMAGE_MEMBER, image)
+                archive.writestr(BACKUP_MANIFEST_MEMBER, manifest_bytes)
+            with self.assertRaisesRegex(ProtocolError, "manifest is unreadable"):
+                validate_preserved_backup(path)
+
+    def test_excessively_nested_json_is_rejected_cleanly(self):
+        image = b"\0" * FLASH_SIZE
+        nesting = sys.getrecursionlimit() * 10
+        manifest_bytes = b"[" * nesting + b"0" + b"]" * nesting
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "backup.zip"
+            with zipfile.ZipFile(path, mode="w") as archive:
+                archive.writestr(BACKUP_IMAGE_MEMBER, image)
+                archive.writestr(BACKUP_MANIFEST_MEMBER, manifest_bytes)
+            with self.assertRaisesRegex(ProtocolError, "manifest is unreadable"):
+                validate_preserved_backup(path)
+
     def test_adb_absence_is_distinguished_for_bootstrap(self):
         result = SimpleNamespace(
             returncode=1,
