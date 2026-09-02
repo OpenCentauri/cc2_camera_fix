@@ -15,14 +15,34 @@ Review date: 2026-09-02
 - The validated manifest contributes exactly three evidenced physical reads,
   satisfying the ordinary non-reference build gate without
   `--allow-fewer-reads`.
-- The hardware-recovery self-test and all three new ZIP-input tests pass on
-  Python 3.12.
+- The hardware-recovery self-test and all seven focused
+  interoperability/config-mode tests pass on Python 3.12.
 
-The full-ROM cases below are the previously recorded regression results; their
-raw inputs were not present in this interoperability-only run and were not
-re-executed on 2026-09-02.
+## Attached raw USB-dump interoperability
 
-## Directly re-executed full-ROM tests
+The locally supplied raw USB dump and adjacent older v1 JSON were used only as
+test inputs and were not added to the repository. The raw 8 MiB image is a
+normal hardware-recovery input. Because its v1 sidecar records only two reads,
+the test used explicit reduced-read acceptance rather than representing that
+sidecar as v2 evidence.
+
+- Default clean-data correctly refused the live unfamiliar `system.sh` name.
+- Clean-data with `--wipe-unknown-config` produced SHA-256
+  `269f1b3b205e2ac30ada7cb98a7aeb9ada2e76786dc14abe95ea9c56dce73d1f`,
+  byte-for-byte equal to the supplied hardware-recovery dump.
+- Preserve-data retained the contents and relevant metadata of all seven live
+  regular files: `dev_config.cfg`, `serial.cfg`, `system.sh`, `uvc.attr`,
+  `uvc.config`, `uvc2.attr`, and `uvc_dualstream.config`.
+- The preserved config contains one cleanmarker, one dirent and one inode per
+  file, and zero obsolete nodes.
+- Both generated full images passed USB maintenance's image safety checks and
+  same-camera allowed-region comparison against the supplied USB dump.
+
+The table below retains the earlier two-unit regression record. Unit B's clean
+output/readback equality was re-executed with the newly attached files; unit A
+was not present in this interoperability run.
+
+## Full-ROM regression record
 
 | Input | Unit identity | Input SHA-256 | Config state | Generated SHA-256 | Result |
 |---|---|---|---|---|---|
@@ -31,7 +51,8 @@ re-executed on 2026-09-02.
 
 Both inputs have the same exact invariant firmware fingerprint and stock SquashFS window, but different serials, UOIDs, two-byte HWCONFIG check values, and raw JFFS2 histories. Each output preserves its own complete HWCONFIG partition and exact recovered `serial.cfg` payload.
 
-The unit-B generated image is byte-for-byte equal to the permanent hardware-readback SHA-256 recorded in the earlier results. The corresponding raw readback was not included in this review, so its bytes could not be independently re-read here.
+The attached unit-B hardware readback was independently hashed and compared
+byte-for-byte with the newly generated clean-data image in this review.
 
 ## Independent filesystem and patch checks
 

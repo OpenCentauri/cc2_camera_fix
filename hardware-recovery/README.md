@@ -14,7 +14,8 @@ Normally JFFS2 garbage collection would reclaim the obsolete copies. On this fir
 
 This tool repairs both parts of that problem:
 
-- it rebuilds the exhausted `config` partition while preserving the camera's own serial data;
+- it rebuilds the exhausted `config` partition, either keeping only the
+  camera's own serial data or recreating every live regular file once;
 - it changes the startup script to create each default file only when it is missing, stopping the deterministic write leak.
 
 ## Check that the camera is actually the problem
@@ -75,9 +76,11 @@ The full system filesystem is not rebuilt. The tool verifies and decompresses th
 
 The input window, compressed fragment, decompressed fragment, original `bashrc.sh`, generated `bashrc.sh`, generated XZ stream, and final window each have independent expected SHA-256 checks. The shorter patched XZ stream intentionally leaves the now-unaddressed trailing stock bytes untouched; the authoritative SquashFS fragment size excludes them.
 
-### Compact config recovery
+### Config recovery modes
 
-The builder extracts the camera's own CRC-valid `serial.cfg` and creates a minimal 128 KiB JFFS2 partition containing:
+`clean-data` is the default and retains the original recovery behavior. The
+builder extracts the camera's own CRC-valid `serial.cfg` and creates a minimal
+128 KiB JFFS2 partition containing:
 
 - one cleanmarker;
 - one `serial.cfg` directory entry;
@@ -86,6 +89,20 @@ The builder extracts the camera's own CRC-valid `serial.cfg` and creates a minim
 - valid JFFS2 header, node, name, and data CRCs.
 
 The five standard UVC/config files are intentionally omitted. The patched startup script creates each missing default once on the first successful boot.
+
+Clean mode refuses to discard CRC-valid names outside the audited stock set.
+If you have inspected the source and intentionally want to wipe unfamiliar
+config contents too, add `--wipe-unknown-config`. That override still preserves
+and cross-checks `serial.cfg`; it is not permission to ignore identity or
+firmware validation failures.
+
+`preserve-data` instead resolves the current root-directory view and recreates
+every live regular file once in a fresh compact JFFS2 image. It preserves file
+contents, mode, owner, timestamps, flags, inode identity, and directory-entry
+metadata, while dropping obsolete/dead historical nodes. It supports
+uncompressed, zero-filled, and zlib-compressed source fragments and fails
+closed on directories, links/special entries, ambiguous metadata, unsupported
+compression, or a live set too large for the audited compact layout.
 
 ## Usage
 
@@ -123,6 +140,27 @@ The second command creates
 `backup.zip` unchanged: USB maintenance uses it both as the preserved
 three-read backup and to prove that the recovery image belongs to the same
 camera before restoring it.
+
+Choose the config treatment explicitly when the default is not appropriate:
+
+```bat
+rem Default: wipe ordinary config and preserve only serial.cfg
+py cc2_sig_tool.py build backup.zip --config-mode clean-data
+
+rem Same clean rebuild, after explicitly approving unfamiliar config names
+py cc2_sig_tool.py build backup.zip --wipe-unknown-config
+
+rem Recreate every live regular config file once, without dead JFFS2 copies
+py cc2_sig_tool.py build backup.zip --config-mode preserve-data
+```
+
+Raw 8 MiB backups are first-class inputs. For a bricked camera, raw dumps made
+with an external programmer are the only acquisition path; supply three stable
+reads with `--confirm` as described below. An older USB export may also consist
+of a raw `.bin` plus `cc2flash-backup-v1` JSON. The raw image remains valid
+input, but that two-read JSON is not accepted as three-read evidence. Supply
+independent confirmation dumps or use `--allow-fewer-reads`; the tool does not
+upgrade or invent missing acquisition evidence.
 
 Build a recovery bundle and require three physical reads to be byte-identical:
 
@@ -186,6 +224,7 @@ py cc2_sig_tool.py build cc2-camera-1.bin --keep-config
 ```
 
 This option is accepted only when the partition already equals the exact canonical rebuild. It refuses exhausted or otherwise noncanonical config, because preserving one could leave the device bricked.
+It cannot be combined with `preserve-data` or `--wipe-unknown-config`.
 
 ## Programmer instructions
 
@@ -274,7 +313,9 @@ py cc2_sig_tool.py verify cc2-camera-recovery.bin cc2-camera-readback.bin
 
 Success is reported only when the files are byte-for-byte identical.
 
-`verify` first requires the expected file to be a strict, patched, canonical recovery image, then requires the full readback to be byte-for-byte identical.
+`verify` first requires the expected file to be a strict, patched recovery image
+with a safely reconstructable config, then requires the full readback to be
+byte-for-byte identical. Both clean-data and preserve-data outputs are valid.
 
 Only disconnect the programmer and attempt a normal boot after this comparison succeeds. Never connect normal camera/USB power and programmer target power simultaneously.
 
@@ -319,7 +360,10 @@ The validator therefore performs the strongest safe equivalent of “100% match 
 4. The excluded fields are still validated:
    - the UOID must have the expected 94-byte structure;
    - `config` must contain CRC-valid JFFS2 nodes;
-   - only the six known filenames are accepted;
+   - clean-data accepts only the six known filenames unless
+     `--wipe-unknown-config` is explicit;
+   - preserve-data accepts additional live names only when every entry can be
+     safely reconstructed as a regular root file;
    - exactly one unambiguous `serial.cfg` value must be recoverable;
    - the serial and UOID must share the expected 12-byte unit prefix.
 
@@ -337,8 +381,10 @@ The builder:
 - never edits boot, kernel, root, or HWCONFIG;
 - preserves the entire input HWCONFIG partition;
 - preserves the original serial payload;
-- validates the generated JFFS2 image by parsing it again;
+- validates the generated JFFS2 image by parsing it again, including a complete
+  content/metadata round trip in preserve-data mode;
 - refuses `--keep-config` for a noncanonical/exhausted partition;
+- refuses ambiguous, unsupported, or oversized preserve-data layouts;
 - refuses unsafe output-directory reuse that could delete inputs or unrelated files;
 - validates the complete generated recovery image again;
 - proves no bytes changed outside the selected patch/config regions;
