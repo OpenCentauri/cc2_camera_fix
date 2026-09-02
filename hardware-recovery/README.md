@@ -89,7 +89,13 @@ The five standard UVC/config files are intentionally omitted. The patched startu
 
 ## Usage
 
-Download `cc2_sig_tool.py` from this repository and place it in a working directory. You need Python 3.10 or later and a full 8 MiB dump from your camera. Do not continue to a write until you have three independently read dumps with identical SHA-256 hashes.
+Download `cc2_sig_tool.py` from this repository and place it in a working directory. You need Python 3.10 or later and either a raw full 8 MiB dump from your camera or an unmodified `cc2flash-backup-v2` ZIP created by the USB-maintenance tool. Do not continue to a write until you have evidence for three identical physical reads.
+
+For raw programmer dumps, supply three independently read files with identical
+SHA-256 hashes as shown below. For a USB backup ZIP, the builder validates
+`flash.bin`, `manifest.json`, the exact member set, hashes, boot fingerprint,
+partition map, and three-consecutive-read acquisition evidence. A valid ZIP
+therefore satisfies the three-read gate directly; do not extract or rewrite it.
 
 The examples below use the Windows Python launcher because NeoProgrammer is a Windows application. On Linux or macOS, replace `py` with `python3`.
 
@@ -105,6 +111,19 @@ Analyze without creating anything:
 py cc2_sig_tool.py analyze cc2-camera-1.bin
 ```
 
+The equivalent USB-backup workflow is:
+
+```bat
+py cc2_sig_tool.py analyze backup.zip
+py cc2_sig_tool.py build backup.zip
+```
+
+The second command creates
+`backup-cc2-recovery\cc2-camera-recovery.bin`. Keep the original
+`backup.zip` unchanged: USB maintenance uses it both as the preserved
+three-read backup and to prove that the recovery image belongs to the same
+camera before restoring it.
+
 Build a recovery bundle and require three physical reads to be byte-identical:
 
 ```bat
@@ -119,7 +138,23 @@ py cc2_sig_tool.py build cc2-camera-1.bin --allow-fewer-reads
 
 Exact full reference dumps listed in `REFERENCE_FINGERPRINTS.json` may be rebuilt from one copy because their complete 8 MiB hashes already match known inputs.
 
-The default output directory is:
+To validate the complete USB round trip without opening USB:
+
+```bat
+cc2flash plan-restore backup-cc2-recovery\cc2-camera-recovery.bin --backup backup.zip
+```
+
+If that passes, the corresponding guarded write command is:
+
+```bat
+cc2flash restore backup-cc2-recovery\cc2-camera-recovery.bin --backup backup.zip
+```
+
+USB maintenance refuses the candidate if any byte outside this builder's
+audited `0x463000–0x46AFFF` system window and
+`0x7E0000–0x7FFFFF` config partition differs from the preserved backup.
+
+For the raw `cc2-camera-1.bin` example, the default output directory is:
 
 ```text
 cc2-camera-1-cc2-recovery

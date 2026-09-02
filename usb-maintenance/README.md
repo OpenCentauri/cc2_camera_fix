@@ -233,6 +233,36 @@ exposes the final ZIP. Publication cannot replace an archive that appears
 concurrently, and an interruption cannot publish only the image or only its
 evidence. Standard ZIP tools can extract `flash.bin` for independent inspection.
 
+### Hardware-recovery interoperability
+
+Pass the unmodified ZIP directly to the hardware-recovery builder; its embedded
+three-consecutive-read evidence satisfies that tool's physical-read gate:
+
+```sh
+python ../hardware-recovery/cc2_sig_tool.py analyze backup.zip
+python ../hardware-recovery/cc2_sig_tool.py build backup.zip
+```
+
+The builder writes
+`backup-cc2-recovery/cc2-camera-recovery.bin`. It does not alter or replace
+`backup.zip`. Preserve that original archive: it remains the acquisition
+evidence required by restore.
+
+Validate the resulting pair without opening USB:
+
+```sh
+cc2flash plan-restore \
+  backup-cc2-recovery/cc2-camera-recovery.bin \
+  --backup backup.zip
+```
+
+This proves that the candidate is a full restore image and is byte-identical to
+the preserved camera backup everywhere except hardware recovery's audited
+`0x463000–0x46afff` SquashFS patch window and
+`0x7e0000–0x7fffff` config partition. The same compatibility check runs again
+before `restore` opens USB, preventing a recovery image from another camera
+or an image with unsupported additional edits from being written.
+
 If ADB lists more than one device, pass the camera serial explicitly:
 
 ```sh
@@ -246,7 +276,7 @@ The exact serial exposed by ADB may differ; use `cc2flash list` to inspect it.
 Validate a candidate without opening USB:
 
 ```sh
-cc2flash plan-restore fixed.bin
+cc2flash plan-restore fixed.bin --backup backup.zip
 ```
 
 A full restore requires exactly `0x800000` bytes.  It also rejects an image
@@ -255,6 +285,8 @@ would return to upgrade mode on every reboot.
 
 Restore requires the separately preserved three-read backup and its v2
 manifest.
+The replacement must match that backup outside the two hardware-recovery
+regions documented above.
 The transport parses each nonfinal ACK as the next expected absolute packet and
 aborts if U-Boot requests retransmission, which this research client does not yet
 implement:
@@ -322,13 +354,14 @@ See [PROTOCOL.md](PROTOCOL.md) for the recovered wire formats and
 python -m unittest discover -s tests -v
 ```
 
-The 78 tests exercise the 57-entry normal command catalog, all configuration and
+The 82 tests exercise the 57-entry normal command catalog, all configuration and
 upload mappings, command builders, U-Boot frame types/ACK decoders, frame
 vectors, checksums, image headers, packet numbering, partition validation, ADB
 absence/offline/error classification, three-consecutive-of-five acquisition,
 boot-hash gating, create-if-absent ZIP publication, strict v2 manifest parsing
 including JSON decoder-limit failures,
 unsupported-compression rejection, both explicit ADB startup commands,
+hardware-recovery region compatibility and pre-USB wrong-unit rejection,
 bounded/validated availability timeouts, expected final-commit
 failure/disconnection, the Windows `error: closed`
 transport handoff, legacy text-shell parsing, ordered binary MTD pulls and

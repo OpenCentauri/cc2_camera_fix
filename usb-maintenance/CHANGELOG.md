@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.8.0 — hardware/USB recovery interoperability
+
+- Bumped the Python client to v0.6.0.
+- Added `plan-restore --backup` so the candidate/preserved-backup pair can be
+  validated without opening USB.
+- Made both `plan-restore --backup` and `restore` require the replacement to
+  match the preserved camera backup byte-for-byte outside hardware recovery's
+  audited `0x463000–0x46afff` SquashFS window and
+  `0x7e0000–0x7fffff` config partition.
+- Split strict preserved-backup loading from its compatibility hash API so the
+  restore guard compares actual bytes, not only filenames or unit identifiers.
+- Documented the complete
+  `cc2flash backup → cc2_sig_tool build → cc2flash restore` workflow.
+- Expanded the offline suite from 78 to 82 tests, including allowed-region
+  interoperability, wrong-unit rejection, offline pair planning, and proof that
+  a compatibility failure occurs before USB is opened.
+
 ## v0.7.0 — read-only backup and stable boot fingerprint
 
 - Bumped the Python client to v0.5.0.

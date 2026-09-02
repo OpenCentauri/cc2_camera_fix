@@ -1,6 +1,6 @@
 # Project status
 
-**Documentation checkpoint: 2026-09-01**
+**Documentation checkpoint: 2026-09-02**
 
 ## Completed
 
@@ -46,10 +46,14 @@
   the implementation.
 - Refactored the CLI-used HID paths to consume the public builders rather than
   maintaining a second set of command literals.
+- Added direct interoperability with hardware recovery: its builder consumes
+  the preserved USB ZIP, while `plan-restore --backup` and `restore` prove the
+  generated image matches that same camera outside the two audited edit
+  regions.
 
 ## Client status
 
-The included Python client is now v0.5.0 with 78 passing offline tests. Its
+The included Python client is now v0.6.0 with 82 passing offline tests. Its
 backup path is strictly read-only and requires three consecutive identical full
 reads within five attempts. Temporary and persistent ADB setup are separate
 commands rather than fallback flags on `backup`. An accepted backup is one ZIP
@@ -59,6 +63,12 @@ and its two-packet mock proves the `ACK 0 → packet 0 → ACK 1 → final packe
 type-5` sequence. It rejects a retransmission request with an explicit error;
 automatic retransmission is not implemented. Restore therefore remains
 hardware-unverified rather than known wire-incompatible.
+
+Before opening USB, restore now compares the replacement with `flash.bin` from
+the validated preserved ZIP. Only hardware recovery's exact SquashFS patch
+window and config partition may differ. This rejects a wrong-camera recovery
+image or unsupported additional edits. The same check is available read-only
+through `plan-restore --backup`.
 
 The expanded tests verify exact catalog completeness, all 21 configuration
 pairs, all 13 uploader commands, all four U-Boot frame types, group-wide

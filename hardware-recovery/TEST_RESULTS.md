@@ -1,8 +1,26 @@
 # Validation and regression test results
 
-Tool version: `1.1.0`
+Tool version: `1.2.0`
 
-Review date: 2026-08-22
+Review date: 2026-09-02
+
+## USB-backup interoperability regression tests
+
+- A strict `cc2flash-backup-v2` ZIP with exactly `flash.bin` and
+  `manifest.json` is accepted without extraction.
+- Image size, SHA-256, MD5, boot fingerprint and acceptance basis, exact MTD
+  partition map, and three-consecutive-of-five acquisition policy are checked
+  before the flash image reaches the firmware validator.
+- A manifest/image hash mismatch and any extra ZIP member are rejected.
+- The validated manifest contributes exactly three evidenced physical reads,
+  satisfying the ordinary non-reference build gate without
+  `--allow-fewer-reads`.
+- The hardware-recovery self-test and all three new ZIP-input tests pass on
+  Python 3.12.
+
+The full-ROM cases below are the previously recorded regression results; their
+raw inputs were not present in this interoperability-only run and were not
+re-executed on 2026-09-02.
 
 ## Directly re-executed full-ROM tests
 
