@@ -8,6 +8,7 @@ import json
 import math
 from pathlib import Path
 import sys
+import time
 
 from . import __version__
 from .adb_backup import (
@@ -368,10 +369,24 @@ def command_restore(args) -> int:
         "reads for post-write verification."
     )
     adb = _adb(args)
+    adb_deadline = time.monotonic() + args.adb_timeout
     try:
-        adb.ensure_available()
+        remaining = adb_deadline - time.monotonic()
+        if remaining <= 0:
+            raise ProtocolError(
+                "post-restore ADB availability timeout expired; write is not "
+                "post-verified"
+            )
+        adb.ensure_available(timeout=min(10.0, remaining))
     except AdbUnavailable:
         _confirm_temporary_adb_for_readback()
+        remaining = adb_deadline - time.monotonic()
+        if remaining <= 0:
+            raise ProtocolError(
+                "post-restore ADB availability timeout expired before the "
+                "temporary start. No HID ADB-start command was sent, and the "
+                "restore is not post-verified"
+            )
         try:
             start_adb_through_upload_command()
         except ProtocolError as exc:
@@ -379,12 +394,23 @@ def command_restore(args) -> int:
                 "normal HID returned, but the explicitly confirmed temporary "
                 "ADB start failed; write is not post-verified"
             ) from exc
-    try:
+        remaining = adb_deadline - time.monotonic()
+        if remaining <= 0:
+            raise ProtocolError(
+                "post-restore ADB availability timeout expired after the "
+                "confirmed temporary start; write is not post-verified"
+            )
+        try:
+            adb.wait_for_device(timeout=remaining)
+        except ProtocolError as exc:
+            raise ProtocolError(
+                "normal HID returned, but ADB readback did not become available; "
+                "write is not post-verified"
+            ) from exc
         # --adb-timeout deliberately bounds only the transition to an online
         # daemon. Stable acquisition is a separate operation: each pull keeps
         # its normal command timeout and no completed read is discarded merely
         # because the availability window expired while verification ran.
-        adb.wait_for_device(timeout=args.adb_timeout)
     except ProtocolError as exc:
         raise ProtocolError(
             "normal HID returned, but ADB readback did not become available; "

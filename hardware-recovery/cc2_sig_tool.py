@@ -646,6 +646,12 @@ def serial_payload_is_valid(payload: bytes) -> bool:
 
 def decode_jffs2_fragment(node: dict[str, Any], name: bytes) -> bytes:
     compression = node["compression"]
+    decompressed_size = node["decompressed_size"]
+    if decompressed_size > CONFIG_SIZE:
+        raise ValidationError(
+            f"Live config file {name!r} has a fragment larger than the config "
+            "partition"
+        )
     if compression == 0:
         data = node["payload"]
     elif compression == 1:
@@ -653,20 +659,38 @@ def decode_jffs2_fragment(node: dict[str, Any], name: bytes) -> bytes:
             raise ValidationError(
                 f"Live config file {name!r} has malformed zero compression"
             )
-        data = b"\0" * node["decompressed_size"]
+        data = b"\0" * decompressed_size
     elif compression == 6:
         try:
-            data = zlib.decompress(node["payload"])
+            decompressor = zlib.decompressobj()
+            # The one-byte margin detects a stream that expands beyond its
+            # declared size without ever allowing more than CONFIG_SIZE + 1
+            # output bytes to be allocated.
+            data = decompressor.decompress(
+                node["payload"], decompressed_size + 1
+            )
         except zlib.error as exc:
             raise ValidationError(
                 f"Live config file {name!r} has invalid JFFS2 zlib data"
             ) from exc
+        if len(data) != decompressed_size:
+            raise ValidationError(
+                f"Live config file {name!r} has a decompressed-size mismatch"
+            )
+        if (
+            not decompressor.eof
+            or decompressor.unconsumed_tail
+            or decompressor.unused_data
+        ):
+            raise ValidationError(
+                f"Live config file {name!r} has invalid JFFS2 zlib data"
+            )
     else:
         raise ValidationError(
             f"Live config file {name!r} uses unsupported JFFS2 compression "
             f"{compression}"
         )
-    if len(data) != node["decompressed_size"]:
+    if len(data) != decompressed_size:
         raise ValidationError(
             f"Live config file {name!r} has a decompressed-size mismatch"
         )

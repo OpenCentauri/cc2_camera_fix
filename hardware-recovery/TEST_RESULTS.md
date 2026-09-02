@@ -15,8 +15,12 @@ Review date: 2026-09-02
 - The validated manifest contributes exactly three evidenced physical reads,
   satisfying the ordinary non-reference build gate without
   `--allow-fewer-reads`.
-- The hardware-recovery self-test and all seven focused
+- The hardware-recovery self-test and all nine focused
   interoperability/config-mode tests pass on Python 3.12.
+- Oversized zero-filled fragments are rejected before allocation. Zlib
+  fragments are rejected before decompression when their declared size exceeds
+  the config partition, and decompression output is bounded when the stream
+  expands beyond its declared size.
 
 ## Attached current USB-backup interoperability
 

@@ -92,6 +92,11 @@ proof that declined or non-interactive post-restore prompts send no HID command,
 the temporary command-injection transaction, and the prior backup/image safety
 checks.
 
+Post-restore ADB availability uses one deadline for the preliminary probe and
+the post-HID wait. The preliminary `get-state` subprocess cannot exceed
+`--adb-timeout`, and it no longer adds its default ten-second budget before the
+documented wait.
+
 Without any setup, the stock USB gadget always enumerates an ADB transport as
 `offline` until `adbd` starts. The availability classifier treats that exact
 state, as well as a genuinely absent device, as eligible for both the temporary

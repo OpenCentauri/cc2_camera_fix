@@ -20,6 +20,9 @@
   exact match through the end of HWCONFIG and reports config changes caused by
   the verification boot instead of incorrectly claiming a full byte-exact
   mismatch.
+- Uses one `--adb-timeout` deadline for the preliminary post-restore ADB probe
+  and the post-HID availability wait; the initial `get-state` can no longer add
+  an independent ten-second delay.
 - Expanded the offline suite from 78 to 85 tests, including allowed-region
   interoperability, wrong-unit rejection, offline pair planning, post-boot
   config handling, temporary ADB startup, and proof that a compatibility

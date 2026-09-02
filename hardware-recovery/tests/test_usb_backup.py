@@ -6,7 +6,9 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
+import zlib
 
 
 TOOL_PATH = Path(__file__).parents[1] / "cc2_sig_tool.py"
@@ -149,6 +151,40 @@ class ConfigModeTests(unittest.TestCase):
         for expected in files:
             self.assertEqual(rebuilt[expected.name].data, expected.data)
             self.assertEqual(rebuilt[expected.name].mode, expected.mode)
+
+    def test_oversized_zero_fragment_is_rejected_before_allocation(self):
+        node = {
+            "compression": 1,
+            "compressed_size": 0,
+            "decompressed_size": tool.CONFIG_SIZE + 1,
+            "payload": b"",
+        }
+        with self.assertRaisesRegex(tool.ValidationError, "larger"):
+            tool.decode_jffs2_fragment(node, b"oversized-zero")
+
+    def test_zlib_fragment_output_is_bounded(self):
+        oversized = {
+            "compression": 6,
+            "compressed_size": 1,
+            "decompressed_size": tool.CONFIG_SIZE + 1,
+            "payload": b"x",
+        }
+        with (
+            mock.patch.object(tool.zlib, "decompressobj") as decompressobj,
+            self.assertRaisesRegex(tool.ValidationError, "larger"),
+        ):
+            tool.decode_jffs2_fragment(oversized, b"oversized-zlib")
+        decompressobj.assert_not_called()
+
+        expanded = zlib.compress(b"x" * (tool.CONFIG_SIZE + 1))
+        node = {
+            "compression": 6,
+            "compressed_size": len(expanded),
+            "decompressed_size": tool.CONFIG_SIZE,
+            "payload": expanded,
+        }
+        with self.assertRaisesRegex(tool.ValidationError, "decompressed-size"):
+            tool.decode_jffs2_fragment(node, b"expanding-zlib")
 
     def test_wipe_override_is_clean_data_only(self):
         with self.assertRaisesRegex(tool.ValidationError, "clean-data"):

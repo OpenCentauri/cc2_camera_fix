@@ -1202,7 +1202,7 @@ class CliAdbWorkflowTests(unittest.TestCase):
         save.assert_not_called()
         self.assertIn(observed, stderr.getvalue())
 
-    def test_restore_adb_timeout_only_bounds_availability_wait(self):
+    def test_restore_online_probe_uses_availability_timeout(self):
         image = b"replacement image"
         fake_adb = mock.Mock()
         plan = mock.sentinel.plan
@@ -1245,7 +1245,10 @@ class CliAdbWorkflowTests(unittest.TestCase):
             ):
                 status = cli.command_restore(args)
         self.assertEqual(status, 0)
-        fake_adb.wait_for_device.assert_called_once_with(timeout=7)
+        fake_adb.ensure_available.assert_called_once()
+        self.assertGreater(fake_adb.ensure_available.call_args.kwargs["timeout"], 0)
+        self.assertLessEqual(fake_adb.ensure_available.call_args.kwargs["timeout"], 7)
+        fake_adb.wait_for_device.assert_not_called()
         acquire.assert_called_once_with(fake_adb, progress=cli._read_progress)
         validate_readback.assert_called_once_with(image, image)
 
@@ -1296,13 +1299,19 @@ class CliAdbWorkflowTests(unittest.TestCase):
                     sys, "stdin", SimpleNamespace(isatty=lambda: True)
                 ),
                 mock.patch("builtins.input", return_value="yes") as prompt,
+                mock.patch.object(
+                    cli.time,
+                    "monotonic",
+                    side_effect=[100.0, 100.25, 100.75, 101.0],
+                ),
                 redirect_stdout(io.StringIO()),
             ):
                 status = cli.command_restore(args)
         self.assertEqual(status, 0)
         prompt.assert_called_once()
         start_adb.assert_called_once_with()
-        fake_adb.wait_for_device.assert_called_once_with(timeout=7)
+        fake_adb.ensure_available.assert_called_once_with(timeout=6.75)
+        fake_adb.wait_for_device.assert_called_once_with(timeout=6.0)
 
     def test_restore_declined_temporary_adb_start_sends_no_hid(self):
         image = b"replacement image"

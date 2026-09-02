@@ -323,10 +323,11 @@ the later ADB question. Empty or negative input, and non-interactive stdin, send
 no ADB-start HID command and leave the completed restore explicitly
 unverified.
 
-`--adb-timeout` bounds only the wait for ADB to become online after normal-mode
-USB returns. Once ADB is online, stable post-write verification begins as a
-separate operation with the ordinary per-command timeouts; the option does not
-claim to bound up to five complete flash reads.
+`--adb-timeout` is one deadline shared by the initial bounded ADB probe and, if
+the temporary start is explicitly confirmed, the post-HID wait for ADB to come
+online. Once ADB is online, stable post-write verification begins as a separate
+operation with the ordinary per-command timeouts; the option does not claim to
+bound up to five complete flash reads.
 
 Do not unplug the camera after the MD5 response.  A failed transfer before the
 MD5 check does not erase flash, but the persistent flag may leave the camera in
@@ -365,7 +366,7 @@ See [PROTOCOL.md](PROTOCOL.md) for the recovered wire formats and
 python -m unittest discover -s tests -v
 ```
 
-The 83 tests exercise the 57-entry normal command catalog, all configuration and
+The 85 tests exercise the 57-entry normal command catalog, all configuration and
 upload mappings, command builders, U-Boot frame types/ACK decoders, frame
 vectors, checksums, image headers, packet numbering, partition validation, ADB
 absence/offline/error classification, three-consecutive-of-five acquisition,
@@ -373,7 +374,8 @@ boot-hash gating, create-if-absent ZIP publication, strict v2 manifest parsing
 including JSON decoder-limit failures,
 unsupported-compression rejection, both explicit ADB startup commands,
 hardware-recovery region compatibility, boot-stable post-write comparison,
-temporary ADB startup after a clean-data restore, and pre-USB wrong-unit rejection,
+separately confirmed temporary ADB startup after a clean-data restore, and
+pre-USB wrong-unit rejection,
 bounded/validated availability timeouts, expected final-commit
 failure/disconnection, the Windows `error: closed`
 transport handoff, legacy text-shell parsing, ordered binary MTD pulls and

@@ -102,7 +102,9 @@ contents, mode, owner, timestamps, flags, inode identity, and directory-entry
 metadata, while dropping obsolete/dead historical nodes. It supports
 uncompressed, zero-filled, and zlib-compressed source fragments and fails
 closed on directories, links/special entries, ambiguous metadata, unsupported
-compression, or a live set too large for the audited compact layout.
+compression, fragments larger than the config partition, zlib streams that
+expand beyond their declared size, or a live set too large for the audited
+compact layout. Zlib decoding caps output at the declared size plus one byte.
 
 ## Usage
 
