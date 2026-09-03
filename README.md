@@ -29,13 +29,13 @@ running either tool.
 1. Power the printer off and unplug it from mains power.
 2. Remove the camera module from the printer by undoing its single mounting
    screw, then unplug its four-wire cable.
-3. Look at the large processor visible through the camera housing.
+3. Look at the large processor on the camera mainboard that's now in front of you.
 
 If it is marked `TX5110`, the camera is likely the newer, unaffected family.
 This recovery does not apply. If it is marked `Ingenic T23`, or the marking is
 unclear, remove the two housing screws and check the complete PCB revision.
 
-![TX5110 processor on a newer CC2 camera](docs/images/ef-s7-v1.0.30d-tx5110.png)
+![TX5110 processor on a newer CC2 camera](docs/images/ef-s7-v1.0.30d-tx5110.jpg)
 
 | Identification | What is known |
 |---|---|
@@ -89,10 +89,10 @@ to the stock camera. Stop this camera-recovery procedure.
 > not continue unless you accept that the restore path remains
 > hardware-unverified.
 
-This route can make a validated backup without opening the camera or attaching
-an SPI programmer. The current tools are still separate, so the route has four
-phases: connect the camera, make a stable backup, build a preventive image, and
-restore that image.
+This route backs up the camera, builds the preventive patch from that backup,
+and writes it back without requiring special hardware like an SPI programmer.
+The current tools are still separate, so the route has four phases: connect the
+camera, make a stable backup, build a preventive image, and restore that image.
 
 ### What you need
 
@@ -118,17 +118,16 @@ is a data cable with all four conductors rather than a charge-only cable.
 
 The camera connector carries ordinary USB 2.0:
 
-| Camera pin | Signal | USB-A pin |
-|---:|---|---:|
-| 1 | GND | 4 |
-| 2 | D+ | 3 |
-| 3 | D- | 2 |
-| 4 | +5 V | 1 |
+| Camera pin | Signal | USB-A pin | Typical USB cable color |
+|---:|---|---:|---|
+| 1 | GND | 4 | Black |
+| 2 | D+ | 3 | Green |
+| 3 | D- | 2 | White |
+| 4 | +5 V | 1 | Red |
 
-Do not trust wire colors. Before connecting the camera, use a multimeter to
-confirm every conductor from the USB plug to its pogo pin and confirm that
-+5 V is not shorted to ground or either data line. Connect the camera to the
-computer only; do not also power it from the printer.
+Do not trust wire colors unverified. Before connecting the camera, use a
+multimeter to confirm every conductor from the USB plug to its pogo pin and
+confirm that +5 V is not shorted to ground or either data line.
 
 ### Current command sequence
 
@@ -257,18 +256,6 @@ the setup connected and diagnose it rather than trying to boot the camera.
 Only after complete verification succeeds should you unplug the programmer,
 remove the clip, reconnect the camera's normal cable, and test it in the
 printer.
-
-## Stop conditions
-
-| Observation | Required response |
-|---|---|
-| Revision is 30D or is not an identified 30B | This guide does not apply. |
-| Replacement webcam also has no feed | Stop this camera-recovery procedure. |
-| Programmer voltage does not match the flash | Do not connect the camera. |
-| Chip detection changes or is only an approximate match | Correct the setup; do not write. |
-| Any of the three reads differs or has the wrong size | Correct the setup; do not erase. |
-| A tool refuses the firmware, identity, layout, backup, or image | Do not bypass the refusal. |
-| Erase, blank check, program, or full-chip Verify fails | Do not attempt a normal boot. |
 
 ## What the repair changes
 
