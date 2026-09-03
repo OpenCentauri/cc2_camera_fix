@@ -4,8 +4,8 @@ Some stock Elegoo Centauri Carbon 2 cameras can stop working after repeated
 printer power cycles. This repository provides two ways to protect or recover
 an affected camera:
 
-- a camera that still works can be backed up and prepared for a future repair
-  through its USB connection;
+- a camera that still works can be backed up, patched, and written back
+  through USB so the failure is prevented before it occurs;
 - a camera that no longer starts can be recovered from its own flash backup
   with an external programmer.
 
