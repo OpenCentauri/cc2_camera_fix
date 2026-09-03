@@ -97,22 +97,38 @@ restore that image.
 ### What you need
 
 - the affected camera, still able to start;
-- a USB cable connected to the camera's four-pin JST-ZH plug;
+- access to a printer with a 0.2 mm nozzle;
+- four P50 pogo pins, such as P50-J1;
+- the USB-A plug and cable from an unused USB data cable;
 - Python 3.10 or later;
 - the Android platform `adb` executable;
 - the optional Python `hidapi` package installed with `cc2flash`.
 
+### Build the camera-to-USB cable
+
+The included [printable pogo-pin adapter](docs/models/cc2-camera-p50-pogo-adapter.stl)
+acts as a plug for the four-pin socket on the camera PCB. Print it with a
+**0.2 mm nozzle** and fit four P50 pogo pins; P50-J1 is one suitable example.
+
+![Printed pogo-pin camera adapter attached to a USB cable](docs/images/cc2-camera-p50-pogo-adapter.png)
+
+The computer end can be salvaged from an old USB-A cable. Cut off the unwanted
+device end, leaving the USB-A plug and enough cable to work with. Make sure it
+is a data cable with all four conductors rather than a charge-only cable.
+
 The camera connector carries ordinary USB 2.0:
 
-| Camera pin | Signal |
-|---:|---|
-| 1 | GND |
-| 2 | D+ |
-| 3 | D- |
-| 4 | +5 V |
+| Camera pin | Signal | USB-A pin |
+|---:|---|---:|
+| 1 | GND | 4 |
+| 2 | D+ | 3 |
+| 3 | D- | 2 |
+| 4 | +5 V | 1 |
 
-Do not trust wire colors without checking continuity. Connect the camera to
-the computer only; do not also power it from the printer.
+Do not trust wire colors. Before connecting the camera, use a multimeter to
+confirm every conductor from the USB plug to its pogo pin and confirm that
++5 V is not shorted to ground or either data line. Connect the camera to the
+computer only; do not also power it from the printer.
 
 ### Current command sequence
 
