@@ -110,7 +110,7 @@ The included [printable pogo-pin adapter](docs/models/cc2-camera-p50-pogo-adapte
 acts as a plug for the four-pin socket on the camera PCB. Print it with a
 **0.2 mm nozzle** and fit four P50 pogo pins; P50-J1 is one suitable example.
 
-![Printed pogo-pin camera adapter attached to a USB cable](docs/images/cc2-camera-p50-pogo-adapter.png)
+![Printed pogo-pin camera adapter attached to a USB cable](docs/images/cc2-camera-p50-pogo-adapter.jpg)
 
 The computer end can be salvaged from an old USB-A cable. Cut off the unwanted
 device end, leaving the USB-A plug and enough cable to work with. Make sure it
