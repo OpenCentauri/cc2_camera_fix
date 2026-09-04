@@ -4,8 +4,9 @@ Some stock Elegoo Centauri Carbon 2 cameras can stop working after repeated
 printer power cycles. This repository provides two ways to protect or recover
 an affected camera:
 
-- a camera that still works can be backed up, patched, and written back
-  through USB so the failure is prevented before it occurs;
+- a camera that still works can be backed up and a preventive image can be
+  built through USB; the current one-command USB write path is not yet ready
+  for end users;
 - a camera that no longer starts can be recovered from its own flash backup
   with an external programmer.
 
@@ -82,17 +83,18 @@ to the stock camera. Stop this camera-recovery procedure.
 
 ## Working camera: USB prevention
 
-> **Experimental write path:** USB communication and flash backup have been
-> tested on physical hardware, but a complete USB restore followed by physical
-> readback verification has not yet been completed. The final preventive write
-> can modify the camera's complete flash. Preserve the validated backup and do
-> not continue unless you accept that the restore path remains
-> hardware-unverified.
+> **USB write currently blocked:** A physical experiment completed a full
+> bootloader transfer, full-flash write, reboot, video test, and independent
+> three-read verification. It also exposed a failure in the preceding
+> normal-mode trigger: on an occupied JFFS2 eraseblock, the stock Linux driver
+> can corrupt the upgrade words without entering U-Boot. Do not run
+> `cc2flash restore` on an ordinary camera until that entry path is fixed and
+> validated as one operation. See the
+> [physical validation record](usb-maintenance/PHYSICAL-VALIDATION.md).
 
-This route backs up the camera, builds the preventive patch from that backup,
-and writes it back without requiring special hardware like an SPI programmer.
-The current tools are still separate, so the route has four phases: connect the
-camera, make a stable backup, build a preventive image, and restore that image.
+This route currently backs up the camera and builds the preventive patch from
+that backup without requiring an SPI programmer. The final USB write is under
+development because the physical validation found a repeatable trigger failure.
 
 ### What you need
 
@@ -129,18 +131,17 @@ Do not trust wire colors unverified. Before connecting the camera, use a
 multimeter to confirm every conductor from the USB plug to its pogo pin and
 confirm that +5 V is not shorted to ground or either data line.
 
-### Current command sequence
+### Current safe command sequence
 
 Installation and detailed stop conditions are documented in the
 [USB-maintenance reference](usb-maintenance/REFERENCE.md). After `cc2flash`
-and `adb` are installed, the normal sequence is:
+and `adb` are installed, the currently supported preparation sequence is:
 
 ```sh
 cc2flash start-adb
 cc2flash backup backup.zip
 python hardware-recovery/cc2_sig_tool.py build backup.zip
 cc2flash plan-restore backup-cc2-recovery/cc2-camera-recovery.bin --backup backup.zip
-cc2flash restore backup-cc2-recovery/cc2-camera-recovery.bin --backup backup.zip
 ```
 
 On Windows, use `py` instead of `python` if that is how Python was installed.
@@ -152,8 +153,8 @@ unchanged and in a separate safe location.
 
 The builder validates the backup and creates the camera-specific preventive
 image. `plan-restore` performs the same-camera and allowed-change checks
-without opening USB. A successful plan is necessary but does not remove the
-experimental status of `restore`.
+without opening USB. Stop there and preserve both files. A successful plan does
+not make the current `restore` trigger safe.
 
 Stop if any command refuses the camera, backup, firmware, partition layout, or
 generated image. Do not work around a validation failure.
@@ -287,6 +288,7 @@ No full camera dump or vendor firmware image is included in this repository.
 - [Hardware-recovery regression results](hardware-recovery/TEST_RESULTS.md)
 - [USB-maintenance reference](usb-maintenance/REFERENCE.md)
 - [USB project and hardware-validation status](usb-maintenance/PROJECT-STATUS.md)
+- [Physical USB restore validation](usb-maintenance/PHYSICAL-VALIDATION.md)
 - [Recovered USB protocol](usb-maintenance/PROTOCOL.md)
 - [USB reverse-engineering evidence](usb-maintenance/EVIDENCE.md)
 
