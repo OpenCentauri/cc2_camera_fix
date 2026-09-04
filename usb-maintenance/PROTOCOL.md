@@ -1,6 +1,6 @@
 # Elegoo Centauri Carbon 2 stock-camera interaction protocol
 
-**Firmware-specific reverse-engineering reference — 2026-09-01**
+**Firmware-specific reverse-engineering reference — updated 2026-09-04**
 
 This document describes every command branch found in the supplied CC2 camera's
 Linux maintenance daemon and U-Boot updater. It covers normal-mode USB HID,
@@ -11,10 +11,12 @@ the absence of any USB flash-read command.
 The catalog is complete for the two analyzed binaries. It is not a claim about
 other firmware revisions. All multibyte integers are little-endian unless noted.
 
-> **Destructive restore remains hardware-unverified.** Client v0.5.0 decodes
-> bootloader ACKs as the next expected packet number and rejects unexpected or
-> retry requests; it does not yet retransmit. ADB startup is separated from the
-> strictly read-only backup command. Both behaviors are detailed below.
+> **Physical status:** one test completed the in-order bootloader HID transfer,
+> full-flash erase/write, normal reboot, video check, and independent three-read
+> verification. The preceding normal-mode trigger is not safe: its stock erase
+> path can fail and page-program the flag over occupied JFFS2 data. The current
+> one-command restore remains unsuitable for end users. See
+> [the physical validation record](PHYSICAL-VALIDATION.md).
 
 ## 1. Evidence, scope, and confidence
 
@@ -400,6 +402,21 @@ SPL checks `word0`. Main U-Boot interprets `word1` as:
 If Linux starts while `word0` still equals `0x55504454`, `/bin/hid_update` clears
 both words to `0xffffffff` during daemon startup.
 
+#### Physical trigger failure
+
+On the tested camera, `0x7f8000` contained the JFFS2 cleanmarker prefix
+`85 19 03 20 0c 00 00 00`. The daemon's erase attempt failed, after which its
+page program produced the bitwise-AND result
+`04 00 00 00 00 00 00 00` instead of the requested words. SPL therefore read
+`0x00000004, 0x00000000` and booted Linux normally.
+
+Runtime errors and exact-kernel disassembly agree on the cause: the SFC driver
+was configured internally for `0x4000`-byte erases, but its sector-erase routine
+selects opcodes only for `0x1000`, `0x8000`, and `0x10000`. A boot-specific live
+RAM experiment changed that internal value to `0x1000`; ordinary 16 KiB MTD
+erase requests were then successfully subdivided into 4 KiB sector erases.
+That dynamic address and mounted-JFFS2 experiment are not a portable procedure.
+
 ## 6. Bootloader updater protocol
 
 ### 6.1 HID envelope
@@ -763,16 +780,17 @@ required before any mutation.
 
 | Component | Current client behavior | Firmware behavior | Status |
 |---|---|---|---|
-| Bootloader data ACK | parses `u32le(next_expected_packet)` and requires the next in-order value; aborts on retry request | payload is the next expected packet, including a batch restart after an error | Wire-aligned for in-order packets; retransmission and hardware validation remain |
+| Bootloader data ACK | parses `u32le(next_expected_packet)` and requires the next in-order value; aborts on retry request | payload is the next expected packet, including a batch restart after an error | In-order 2,742-packet physical transfer passed; retransmission remains unimplemented and untested |
 | Persistent ADB start | separate guarded command installs `/etc/conf.d/system.sh`; backup remains read-only | `rcS` executes the persistent hook next boot | Implemented and offline-tested; manual hook behavior runtime-verified |
 | Temporary ADB start | separate command sends an immutable no-space upload target, tolerates only final-commit failure/disconnect, and polls across the old transport closing | unquoted `rm` target starts `/bin/adbd`; literal `fopen` then fails | Physical startup and root shell verified on Windows |
 | Backup acceptance | requires three consecutive identical full reads within five attempts, gates on the known or explicitly accepted boot hash, and publishes one verified ZIP | ADB sync/`pull` can read each raw MTD device | Complete 8 MiB live acquisition verified; strengthened read/archive policy is offline-tested |
 | Public Python catalog | exposes all 57 exact normal commands, every `0x4xxx` match, and boot types 1/2/3/5 with builders/decoders | complete analyzed dispatcher/state-machine surface | Implemented with source comments and exhaustive offline mapping tests |
 
-The protocol builder, MD5 header, packet numbering, range checks, and
-normal-to-boot trigger are consistent with the analyzed code. Restore is still
-not called hardware-ready because USB enumeration/timing, retransmission, and
-erase/write behavior have not been validated on a physical camera.
+The protocol builder, MD5 header, packet numbering, and bootloader transfer are
+consistent with the analyzed code and the one-camera physical result. Restore
+is still not hardware-ready because the normal-to-boot trigger has a confirmed
+erase failure, retransmission remains unimplemented, and no uninterrupted
+workaround has been physically validated.
 
 ## 11. Static-analysis anchors
 
@@ -808,15 +826,15 @@ addresses. The main U-Boot image starts at flash file offset `0x6800`, linked at
 
 The following remain hardware-unverified or unknown:
 
-- normal and bootloader endpoint numbers assigned at runtime;
 - the bootloader CDC PID and exact serial endpoint configuration;
-- host HID API differences involving report-ID prefixes;
-- physical validation of the strengthened three-consecutive-read acquisition;
-- physical timeout/retry timing and reboot duration;
-- erase/write behavior and failure reporting on the installed NOR chip;
+- host HID API differences on systems other than the tested Windows host;
+- retransmission behavior after a physical retry request;
+- a safe uninterrupted normal-Linux-to-U-Boot entry procedure;
+- general erase/write behavior and failure reporting beyond the one successful
+  full-image write;
 - whether other CC2 camera firmware revisions use the same commands; and
 - any board-level recovery behavior associated with the `BSL0` pad.
 
 These uncertainties do not change the command catalog, ACK semantics, lack of
-USB readback, or the unsafe success-before-write behavior established from the
-supplied binaries.
+bootloader USB readback, the physically observed trigger failure, or the unsafe
+success-before-write behavior.
