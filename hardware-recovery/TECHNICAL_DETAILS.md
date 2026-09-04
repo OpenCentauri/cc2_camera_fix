@@ -105,7 +105,7 @@ compact layout. Zlib decoding caps output at the declared size plus one byte.
 
 ## Supported image family
 
-This release intentionally accepts only the exact firmware family already verified in two independent camera dumps with different unit identities:
+This release intentionally accepts only the exact firmware family already verified in three independent camera dumps with different unit identities:
 
 - 8 MiB `ZB25VQ64` SPI NOR
 - Ingenic T23N
@@ -129,9 +129,29 @@ There is no override or `--force` option for a mismatching firmware build. A ref
 
 A complete raw dump cannot be compared by ignoring only the visible serial string. JFFS2 appends new nodes on each boot, so two otherwise identical cameras naturally have different raw `config` histories. The HWCONFIG partition also contains a per-unit UOID and an associated two-byte value.
 
+Two exact shapes of its type-12 length-prefixed record are supported:
+
+| Variant | Encoded payload length | Bytes after the original 256-byte payload |
+|---|---:|---|
+| `type12-length256` | 256 (`0x0100`) | none |
+| `type12-length261-trailer-0000029840` | 261 (`0x0105`) | `00 00 02 98 40` |
+
+The second shape was observed in a third stable three-read dump. Its boot,
+kernel, root, system, stock startup-script window, partition layout, identity
+structure, and exhausted JFFS2 failure state match the supported family. The
+record length exactly includes the five added bytes. The camera's own
+`ucamera` executable advances over this structure as a little-endian 16-bit
+type, a little-endian 16-bit payload length, and that many payload bytes.
+
+The meaning of the five-byte extension is unknown. The validator therefore
+accepts only the exact observed length/trailer combination and its complete
+variant-specific invariant fingerprints. It rejects arbitrary extensions,
+nearby lengths, and mixtures of the two variants. Recovery preserves the
+complete input HWCONFIG partition byte-for-byte.
+
 The validator therefore performs the strongest safe equivalent of “100% match apart from unit data”:
 
-1. Every firmware byte that should be invariant must match the two independently obtained references exactly.
+1. Every firmware byte that should be invariant must match the exact fingerprints for one recognized HWCONFIG record variant.
 2. The 32 KiB SquashFS window containing `bashrc.sh` must equal either the exact stock hash or the exact audited patched hash.
 3. Only these unit-specific or mutable fields are excluded from the invariant hash:
 
@@ -178,9 +198,15 @@ The builder:
 
 This is a mitigation for the deterministic per-boot write leak. It does not repair the underlying Ingenic SFC/JFFS2 erase-size defect. Other software that performs persistent writes could still consume config space.
 
-The tool supports only the exact firmware build represented by the embedded fingerprints. A future Elegoo/Jovision build must be analyzed and fingerprinted separately.
+The tool supports only the exact firmware build and HWCONFIG shapes represented by the embedded fingerprints. A future Elegoo/Jovision build or another HWCONFIG record shape must be analyzed and fingerprinted separately.
 
-Two real unit identities were directly tested. Cross-serial support is fail-closed: invariant firmware must match exactly; the UOID and serial must each match their observed structure and share the observed 12-byte prefix; all unit-specific HWCONFIG bytes and the recovered serial payload are preserved exactly. Because the proprietary full serial↔UOID derivation is unknown, the tool cannot prove more than that relationship for a previously unseen unit.
+Three real unit identities were directly inspected, including one with the
+261-byte HWCONFIG record. Cross-serial support is fail-closed: invariant
+firmware must match the identified variant exactly; the UOID and serial must
+each match their observed structure and share the observed 12-byte prefix; all
+unit-specific HWCONFIG bytes and the recovered serial payload are preserved
+exactly. Because the proprietary full serial↔UOID derivation is unknown, the
+tool cannot prove more than that relationship for a previously unseen unit.
 
 Static analysis can prove that a bricked dump is transformed into the exact known recovery bytes and that all relevant filesystems/checksums validate. Actual boot recovery still requires a controlled flash, full readback verification, and an observed successful boot; software-only review cannot replace that hardware test.
 

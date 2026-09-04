@@ -11,7 +11,7 @@
     "start": "0x7E0000",
     "validation": "JFFS2 structure/CRCs, known names, unambiguous serial, serial/UOID prefix"
   },
-  "format_version": 2,
+  "format_version": 3,
   "full_size": 8388608,
   "invariant_definition": {
     "excluded_ranges": [
@@ -33,7 +33,26 @@
     ],
     "included": "All bytes from 0x000000 through 0x7DFFFF except the ranges listed below"
   },
-  "invariant_sha256": "7346221d7814c8ef4412ced5f3795891f077f89ba64cf61d087e01fc5344f62f",
+  "invariant_sha256_by_hwconfig_variant": {
+    "type12-length256": "7346221d7814c8ef4412ced5f3795891f077f89ba64cf61d087e01fc5344f62f",
+    "type12-length261-trailer-0000029840": "8b0d60148f6205bc76adb6429375b0353db175e85a6b1c384da9a7ac3460d921"
+  },
+  "hwconfig_variants": {
+    "type12-length256": {
+      "record_type": 12,
+      "payload_length": 256,
+      "extension_hex": "",
+      "before_identity_sha256": "0e1514680c4e25e5c431adae5d4cb98bac14746b6e8fc30eb346ec75249f7cc5",
+      "after_uoid_sha256": "98d0beba4c7328a7237bc1a18fdd5e3da64c9f009e3b1c253ea39167a6dabd97"
+    },
+    "type12-length261-trailer-0000029840": {
+      "record_type": 12,
+      "payload_length": 261,
+      "extension_hex": "0000029840",
+      "before_identity_sha256": "b0aa28d193004cfbefc4d339a44681bddbbcb57e1ff653c4697e43834352e149",
+      "after_uoid_sha256": "4ea5fb2a33d91a471aab8e923168b30ab4be5d05869e6095ba793e167b9199e0"
+    }
+  },
   "reference_images": [
     {
       "label": "Discord bricked image",
@@ -54,24 +73,19 @@
       "label": "Second camera permanent full readback",
       "sha256": "269f1b3b205e2ac30ada7cb98a7aeb9ada2e76786dc14abe95ea9c56dce73d1f",
       "state": "audited bashrc patch, rebuilt config"
+    },
+    {
+      "label": "Third camera bricked image",
+      "sha256": "75d676ba4e478572777761d8caea43a6774a51d812050e4ba6ffa371a8ccc1e1",
+      "state": "stock system, exhausted config, 261-byte HWCONFIG record"
     }
   ],
-  "scope": "Exact CC2 stock-camera firmware family observed in two independent cameras",
+  "scope": "Exact CC2 stock-camera firmware family and two HWCONFIG shapes observed in three independent cameras",
   "segments": {
     "boot": {
       "end_exclusive": "0x040000",
       "sha256": "5602ec961b4410ccceea0d4910e4fa768c6998bd4ba86143ba50855bdd0b7a54",
       "start": "0x000000"
-    },
-    "hwconfig_after_uoid": {
-      "end_exclusive": "0x7E0000",
-      "sha256": "98d0beba4c7328a7237bc1a18fdd5e3da64c9f009e3b1c253ea39167a6dabd97",
-      "start": "0x7D206F"
-    },
-    "hwconfig_before_identity_check": {
-      "end_exclusive": "0x7D200B",
-      "sha256": "0e1514680c4e25e5c431adae5d4cb98bac14746b6e8fc30eb346ec75249f7cc5",
-      "start": "0x7D0000"
     },
     "hwconfig_between_identity_fields": {
       "end_exclusive": "0x7D2011",
@@ -119,5 +133,5 @@
       "uncompressed_size": 100167
     }
   },
-  "tool_version": "1.2.0"
+  "tool_version": "1.2.1"
 }
