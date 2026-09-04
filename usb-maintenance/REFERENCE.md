@@ -6,11 +6,13 @@ The normal user journey begins in the [main camera guide](../README.md). This do
 the stock Elegoo Centauri Carbon 2 camera firmware found in the supplied
 8 MiB flash dump.
 
-> **Research status:** the library now decodes bootloader type-2 ACK payloads as
-> `u32le(next_expected_packet)` and rejects unexpected/retry requests instead of
-> treating them as zero. Destructive restore is still hardware-unverified, and
-> automatic retransmission is not implemented. Preserve a three-read backup and
-> read `PROTOCOL.md`, sections 9, 10, and 12 before considering a write.
+> **Research status:** a physical test validated in-order bootloader HID
+> transfer, full-flash erase/write, normal reboot, video, and independent
+> three-read verification on one camera. The same test found that the preceding
+> normal-mode trigger can fail destructively when its config-sector target is
+> occupied. The current one-command `restore` path is therefore not ready for
+> end users. Preserve a three-read backup and read
+> `PHYSICAL-VALIDATION.md` before considering further experiments.
 
 The important result is that the bootloader USB updater is **write-only**. It
 does not implement a flash-read request. The included backup implementation
@@ -273,7 +275,7 @@ cc2flash backup --serial Ucamera001 backup.zip
 
 The exact serial exposed by ADB may differ; use `cc2flash list` to inspect it.
 
-## Intended restore workflow (not hardware-ready)
+## Restore workflow status (entry path not safe)
 
 Validate a candidate without opening USB:
 
@@ -291,11 +293,18 @@ The replacement must match that backup outside the two hardware-recovery
 regions documented above.
 The transport parses each nonfinal ACK as the next expected absolute packet and
 aborts if U-Boot requests retransmission, which this research client does not yet
-implement:
+implement. The command currently exists as:
 
 ```sh
 cc2flash restore fixed.bin --backup backup.zip
 ```
+
+**Do not run that command on an ordinary camera.** Physical validation showed
+that the stock Linux driver may page-program the eight-byte trigger over an
+occupied JFFS2 node without successfully erasing it first. NOR bit constraints
+then produce neither the requested flag nor a bootloader reboot, and the target
+JFFS2 node is damaged. The full byte-level evidence and the later successful
+lab continuation are in [PHYSICAL-VALIDATION.md](PHYSICAL-VALIDATION.md).
 
 The command is intended to print the complete target range and hashes, then
 require the literal confirmation `RESTORE-CC2`. Its planned phases are:
@@ -331,7 +340,7 @@ online. Once ADB is online, stable post-write verification begins as a separate
 operation with the ordinary per-command timeouts; the option does not claim to
 bound up to five complete flash reads.
 
-Do not unplug the camera after the MD5 response.  A failed transfer before the
+Do not unplug the camera after the MD5 response. A failed transfer before the
 MD5 check does not erase flash, but the persistent flag may leave the camera in
 bootloader mode; reconnecting the bootloader and retransmitting a full known
 image is then the intended recovery path.
@@ -344,7 +353,16 @@ image is then the intended recovery path.
   invocation produced matching full reads. The client now requires three
   consecutive matches within five attempts.
 - Bootloader data ACK parsing now matches the disassembly for in-order packets,
-  but automatic retransmission and physical-camera validation remain absent.
+  and one physical in-order transfer completed all 2,742 packets. Automatic
+  retransmission remains absent and was not exercised.
+- The bootloader full-flash erase/write, normal reboot, live video, and
+  independent three-consecutive-read verification succeeded on one camera.
+  This does not validate the preceding normal-mode trigger or the current
+  end-to-end CLI invocation.
+- The stock Linux SFC driver advertises a 16 KiB erase size while its erase
+  routine has opcode cases for 4, 32, and 64 KiB only. A boot-specific live RAM
+  change to the internal size made 4 KiB sector erases work, confirming the
+  mismatch, but that experiment is not a reusable fix.
 - The explicit persistent ADB recovery overwrites a startup hook before the
   first backup; the temporary upload-command route avoids that file but deliberately
   relies on a vendor command-injection bug. That temporary startup has now been
