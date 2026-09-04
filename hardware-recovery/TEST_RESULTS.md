@@ -1,8 +1,8 @@
 # Validation and regression test results
 
-Tool version: `1.2.0`
+Tool version: `1.2.1`
 
-Review date: 2026-09-02
+Review date: 2026-09-04
 
 ## USB-backup interoperability regression tests
 
@@ -68,6 +68,14 @@ byte-for-byte with the newly generated clean-data image in this review.
 
 ## Regression and rejection tests
 
+- Both exact type-12 HWCONFIG record shapes (256-byte payload and the observed
+  261-byte payload with trailer `00 00 02 98 40`): accepted.
+- A one-byte trailer mutation, an unobserved 262-byte record, and a non-type-12
+  record: rejected.
+- A locally reconstructed full image with the third camera's invariant variant
+  bytes passed strict analysis and recovery generation; the generated image
+  retained HWCONFIG byte-for-byte. This is software validation, not a physical
+  flash or boot test of that camera.
 - Two distinct real serial/UOID pairs: accepted and preserved.
 - Structurally valid synthetic third unit with two confirmation reads (three total): accepted and preserved.
 - Non-reference unit with only one read: rejected unless `--allow-fewer-reads` is explicit.
