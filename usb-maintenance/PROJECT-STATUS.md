@@ -1,6 +1,6 @@
 # Project status
 
-**Documentation checkpoint: 2026-09-02**
+**Documentation checkpoint: 2026-09-04**
 
 ## Completed
 
@@ -63,11 +63,12 @@ backup path is strictly read-only and requires three consecutive identical full
 reads within five attempts. Temporary and persistent ADB setup are separate
 commands rather than fallback flags on `backup`. An accepted backup is one ZIP
 archive, so the raw image cannot be published without its evidence manifest.
-The restore path now parses type-2 payloads as the next expected absolute packet
-and its two-packet mock proves the `ACK 0 → packet 0 → ACK 1 → final packet →
-type-5` sequence. It rejects a retransmission request with an explicit error;
-automatic retransmission is not implemented. Restore therefore remains
-hardware-unverified rather than known wire-incompatible.
+The restore path parses type-2 payloads as the next expected absolute packet and
+rejects a retransmission request with an explicit error; automatic
+retransmission is not implemented. A physical in-order transfer completed all
+2,742 packets and reached the full-flash erase/write path. The current command
+is nevertheless not end-user ready because the preceding normal-mode upgrade
+trigger has a confirmed destructive failure mode.
 
 Before opening USB, restore now compares the replacement with `flash.bin` from
 the validated preserved ZIP. Only hardware recovery's exact SquashFS patch
@@ -105,8 +106,32 @@ malformed-device states remain refusals.
 
 ## Hardware status
 
-- No destructive camera write was performed in this analysis.
-- Normal and bootloader enumeration/timing have not been captured here.
+- A destructive physical experiment was completed on one
+  `EF-S7-V1.0.30B`/T23N/ZB25VQ64 camera. The sanitized record is in
+  [PHYSICAL-VALIDATION.md](PHYSICAL-VALIDATION.md).
+- The first normal-mode trigger attempted to write the eight-byte upgrade flag
+  over a JFFS2 cleanmarker at `0x7f8000`. Its erase failed, and the observed
+  bytes were exactly the bitwise AND of the old data and requested flag. SPL
+  read `0x00000004, 0x00000000`, so it booted Linux rather than U-Boot HID.
+- Runtime logging and exact-kernel disassembly identified an erase-geometry
+  mismatch: the driver was configured for `0x4000`, while the sector-erase
+  routine has opcode cases only for `0x1000`, `0x8000`, and `0x10000`.
+  Temporarily changing the boot-specific live field to `0x1000` made complete
+  MTD erases succeed. That dynamic RAM edit is diagnostic evidence, not a
+  reusable fix.
+- After experimental config preconditioning, SPL read the exact upgrade words
+  and bootloader HID `a108:ff08` enumerated. A one-off continuation transmitted
+  all 2,742 packets. U-Boot accepted the RAM-image MD5, erased and wrote the
+  complete 8 MiB image, and returned to normal USB.
+- The camera produced live video after the write. Temporary ADB startup then
+  worked, and a post-write backup obtained three consecutive identical 8 MiB
+  reads in three attempts. Boot through HWCONFIG matched the candidate exactly;
+  strict validation passed, while config differed only as expected from the
+  clean-data first boot. `system.sh` was absent.
+- The tested sequence was not one uninterrupted client operation. It required
+  a boot-specific RAM patch, process control, a filesystem-unsafe erase while
+  JFFS2 remained mounted, and a separate transfer continuation after the
+  original CLI timed out. It must not be presented as an end-user workflow.
 - No direct USB flash-read command was found. The temporary ADB route avoids
   installing a persistent file: it attempts a tmpfs removal, starts `/bin/adbd`,
   and then reaches the vendor's `sync` plus expected failing `fopen`. Normal
@@ -119,14 +144,15 @@ malformed-device states remain refusals.
   `hid_update` control flow. Its first physical-camera test successfully started
   `/bin/adbd` and allowed `adb shell`; the Windows host exposed a now-corrected
   retry bug by returning `error: closed` from the old USB transport first.
-- The same live session confirmed that stock `adbd` rejects `exec-out`, but its
+- An earlier live session confirmed that stock `adbd` rejects `exec-out`, but its
   sync service pulls raw MTD devices without byte changes. A later invocation
   acquired a complete 8 MiB image with SHA-256
   `bccc6818a998d1c143c94543194e2d314cdee7a5f43b62db1fc6bb0b038c22a7`.
   Its boot partition is byte-identical to the supplied reference image and has
   SHA-256
   `5602ec961b4410ccceea0d4910e4fa768c6998bd4ba86143ba50855bdd0b7a54`.
-  The strengthened three-consecutive-read policy is not yet physically rerun.
+  The strengthened three-consecutive-read policy has now also passed both the
+  pre-write and post-write physical acquisitions used for this experiment.
 
 The authoritative protocol and full command catalog are in `PROTOCOL.md`; static
 anchors and hashes are in `EVIDENCE.md`. The human-readable reconstruction and
