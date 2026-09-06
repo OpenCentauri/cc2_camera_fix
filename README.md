@@ -91,9 +91,8 @@ and writes that image through USB without requiring an SPI programmer.
 - access to a printer with a 0.2 mm nozzle;
 - four P50 pogo pins, such as P50-J1;
 - the USB-A plug and cable from an unused USB data cable;
-- Python 3.10 or later;
-- the Android platform `adb` executable;
-- the optional Python `hidapi` package installed with `cc2flash`.
+- [cc2flash installed](docs/INSTALLATION.md), either the Windows executable or Python package;
+- the Android platform `adb` executable as described in the installation guide.
 
 ### Build the camera-to-USB cable
 
@@ -123,18 +122,20 @@ confirm that +5 V is not shorted to ground or either data line.
 ### USB prevention command sequence
 
 Installation and detailed stop conditions are documented in the
-[USB-maintenance reference](usb-maintenance/REFERENCE.md). After `cc2flash`
-and `adb` are installed, the supported sequence is:
+[USB-maintenance reference](usb-maintenance/REFERENCE.md). After following the [installation guide](docs/INSTALLATION.md) for `cc2flash`
+and `adb`, the supported sequence is:
 
 ```sh
 cc2flash start-adb
 cc2flash backup backup.zip
-python hardware-recovery/cc2_sig_tool.py build backup.zip
-cc2flash plan-restore backup-cc2-recovery/cc2-camera-recovery.bin --backup backup.zip
+cc2flash build-image backup.zip
+cc2flash restore --dry-run backup-cc2-recovery/cc2-camera-recovery.bin --backup backup.zip
 cc2flash restore backup-cc2-recovery/cc2-camera-recovery.bin --backup backup.zip
 ```
 
-On Windows, use `py` instead of `python` if that is how Python was installed.
+Use the command prefix from your [platform's installation instructions](docs/INSTALLATION.md).
+If ADB is not on PATH, add `--adb "path/to/adb"` to connected-camera commands,
+but not to offline `build-image` or `restore --dry-run`.
 
 `start-adb` temporarily starts the camera's existing root ADB service.
 `backup` then reads the complete flash repeatedly and publishes `backup.zip`
@@ -142,7 +143,7 @@ only after obtaining three consecutive identical images. Keep that ZIP
 unchanged and in a separate safe location.
 
 The builder validates the backup and creates the camera-specific preventive
-image. `plan-restore` performs the same-camera and allowed-change checks
+image. `restore --dry-run` performs the same-camera and allowed-change checks
 without opening USB. `restore` repeats those checks, validates the live camera
 against the preserved backup, temporarily prepares the known stock SFC driver,
 and requires the literal confirmation `RESTORE-CC2` before its first write.
@@ -166,8 +167,7 @@ a command line.
 - an SOIC-8 test clip and cable;
 - a multimeter;
 - NeoProgrammer;
-- Python 3.10 or later;
-- the files from this repository.
+- [cc2flash installed](docs/INSTALLATION.md); the standalone Windows executable needs no Python or Git.
 
 The CH341 worked with the flash still soldered on the tested camera. A Bus
 Pirate is possible but was not reliable in-circuit on that setup; see the
@@ -214,12 +214,11 @@ the only verified backup of this camera's identity-bearing data.
 
 ### 4. Build the recovery image
 
-In Windows Explorer, open the folder containing `cc2_sig_tool.py` and the three
-dump files. Click the address bar, type `cmd`, and press Enter. Then run this
-single command:
+Open a terminal in the folder containing your three dump files, as described
+in the [installation guide](docs/INSTALLATION.md). Run:
 
-```bat
-py cc2_sig_tool.py build cc2-camera-1.bin --confirm cc2-camera-2.bin cc2-camera-3.bin
+```sh
+cc2flash build-image cc2-camera-1.bin --confirm-read cc2-camera-2.bin --confirm-read cc2-camera-3.bin
 ```
 
 The command performs the stability, firmware, flash-layout, identity, patch,
@@ -275,6 +274,8 @@ No full camera dump or vendor firmware image is included in this repository.
 
 ## Advanced and audit documentation
 
+- [Installation and release downloads](docs/INSTALLATION.md)
+- [Complete cc2flash command reference](docs/CLI.md)
 - [Hardware-recovery CLI reference](hardware-recovery/CLI_REFERENCE.md)
 - [Programmer and alternative-hardware reference](hardware-recovery/PROGRAMMER_REFERENCE.md)
 - [Independent recovery-tool verification](hardware-recovery/CC2_RECOVERY_VERIFICATION.md)
@@ -284,4 +285,3 @@ No full camera dump or vendor firmware image is included in this repository.
 - [Physical USB restore validation](usb-maintenance/PHYSICAL-VALIDATION.md)
 - [Recovered USB protocol](usb-maintenance/PROTOCOL.md)
 - [USB reverse-engineering evidence](usb-maintenance/EVIDENCE.md)
-

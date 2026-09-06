@@ -5,4 +5,4 @@ from . import commands as commands
 
 __all__ = ["__version__", "commands"]
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"

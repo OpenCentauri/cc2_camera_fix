@@ -15,7 +15,7 @@ Review date: 2026-09-04
 - The validated manifest contributes exactly three evidenced physical reads,
   satisfying the ordinary non-reference build gate without
   `--allow-fewer-reads`.
-- The hardware-recovery self-test and all nine focused
+- The deterministic patch/XZ/JFFS2 checks and the focused
   interoperability/config-mode tests pass on Python 3.12.
 - Oversized zero-filled fragments are rejected before allocation. Zlib
   fragments are rejected before decompression when their declared size exceeds
@@ -30,8 +30,8 @@ reads, the known bootloader fingerprint, and the camera's six-partition map.
 
 - The unmodified ZIP passed strict archive, evidence, partition-map, firmware,
   identity, and JFFS2 validation without reduced-read overrides.
-- Default clean-data correctly refused the live unfamiliar `system.sh` name.
-- Clean-data with `--wipe-unknown-config` and preserve-data both built directly
+- Default serial-only correctly refused the live unfamiliar `system.sh` name.
+- Serial-only with `--wipe-unknown-config` and preserve-files both built directly
   from the ZIP without extraction.
 - Preserve-data retained the contents and relevant metadata of all seven live
   regular files: `dev_config.cfg`, `serial.cfg`, `system.sh`, `uvc.attr`,
@@ -55,7 +55,7 @@ was not present in this interoperability run.
 Both inputs have the same exact invariant firmware fingerprint and stock SquashFS window, but different serials, UOIDs, two-byte HWCONFIG check values, and raw JFFS2 histories. Each output preserves its own complete HWCONFIG partition and exact recovered `serial.cfg` payload.
 
 The attached unit-B hardware readback was independently hashed and compared
-byte-for-byte with the newly generated clean-data image in this review.
+byte-for-byte with the newly generated serial-only image in this review.
 
 ## Independent filesystem and patch checks
 
@@ -82,7 +82,6 @@ byte-for-byte with the newly generated clean-data image in this review.
 - One-bit kernel mutation: rejected.
 - One-bit system-patch-window mutation: rejected.
 - Serial from one unit combined with another unit's UOID: rejected.
-- `--keep-config` on either exhausted bricked partition: rejected.
 - One-bit full-programmer readback mismatch: rejected with the affected region.
 - Rebuilding an already patched canonical image: idempotent; no write region reported.
 - Existing output directory containing an unknown entry: rejected instead of deleting it.

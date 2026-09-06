@@ -47,11 +47,11 @@
 - Refactored the CLI-used HID paths to consume the public builders rather than
   maintaining a second set of command literals.
 - Added direct interoperability with hardware recovery: its builder consumes
-  the preserved USB ZIP, while `plan-restore --backup` and `restore` prove the
+  the preserved USB ZIP, while `restore --dry-run --backup` and `restore` prove the
   generated image matches that same camera outside the two audited edit
   regions.
 - Made post-write verification compatible with both hardware-recovery config
-  modes: after a clean-data boot it separately prompts for permission to start
+  modes: after a serial-only boot it separately prompts for permission to start
   ADB temporarily, requires an exact match through HWCONFIG, and separately
   reports config changes made by that boot. It never treats restore `--yes` as
   consent to start ADB.
@@ -74,12 +74,12 @@ Before opening USB, restore now compares the replacement with `flash.bin` from
 the validated preserved ZIP. Only hardware recovery's exact SquashFS patch
 window and config partition may differ. This rejects a wrong-camera recovery
 image or unsupported additional edits. The same check is available read-only
-through `plan-restore --backup`.
+through `restore --dry-run --backup`.
 
 After restore, the client acquires another three consecutive reads. All bytes
 through `0x7dffff` must match the candidate exactly. The writable config
 partition is compared and reported separately because the first successful
-clean-data boot recreates missing defaults before ADB can read it back.
+serial-only boot recreates missing defaults before ADB can read it back.
 
 The expanded tests verify exact catalog completeness, all 21 configuration
 pairs, all 13 uploader commands, all four U-Boot frame types, group-wide
@@ -128,7 +128,7 @@ malformed-device states remain refusals.
   worked, and a post-write backup obtained three consecutive identical 8 MiB
   reads in three attempts. Boot through HWCONFIG matched the candidate exactly;
   strict validation passed, while config differed only as expected from the
-  clean-data first boot. `system.sh` was absent.
+  serial-only first boot. `system.sh` was absent.
 - A later test exercised the integrated client as one uninterrupted operation,
   without a manual RAM edit, config erase, process suspension, or separate
   continuation. It obtained three stable pre-write reads, completed the dynamic

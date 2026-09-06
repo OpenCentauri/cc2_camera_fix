@@ -132,3 +132,4 @@ def prepare_restore(adb: AdbClient, preserved: bytes, *, progress=None) -> None:
             f"{exc}; no HID trigger was sent. RAM may already be patched; "
             "no automatic retry or rollback was attempted"
         ) from exc
+

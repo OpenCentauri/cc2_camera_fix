@@ -1,7 +1,7 @@
 # CC2 camera recovery tool — independent verification
 
 Review date: 2026-08-22  
-Reviewed tool: `cc2_sig_tool.py` v1.1.0
+Scope: independent audit of the recovery-image algorithm; current entry point: `cc2flash build-image`.
 
 ## Conclusion
 
@@ -81,10 +81,9 @@ An independent read-only SquashFS v4/XZ parser extracted `bashrc.sh` from the st
 
 Additional safety changes:
 
-- `--keep-config` refuses any exhausted or noncanonical partition;
 - non-reference devices require three matching reads by default;
-- readback verification first validates that the expected image is patched and canonical;
-- output overwrite cannot recursively delete inputs, subdirectories, symlink targets, or unrelated files;
+- generated recovery images are strictly validated before programmer verification;
+- existing output directories are refused without deleting their contents;
 - generated Bus Pirate examples use documented `dev` and `spispeed` parameters and do not silently enable target power. See the [official flashrom Bus Pirate documentation](https://flashrom.org/supported_hw/supported_prog/buspirate.html).
 
 ## Regression results
@@ -103,9 +102,9 @@ All executed tests passed:
 ## Recommended hardware validation sequence
 
 1. Make three full reads without moving the clip; require identical SHA-256 hashes.
-2. Run `analyze`, then `build` with the other two reads supplied via `--confirm`.
+2. Run `inspect-image`, then `build-image` with the other two reads supplied via `--confirm-read`.
 3. Verify the exact flash part voltage and all SPI connections from the marking/datasheet.
 4. Write only the generated layout regions. Do not power the target simultaneously from USB/device power and programmer target power.
 5. Without disturbing the connection, make a full 8 MiB readback.
-6. Run the tool's `verify` command and require byte-for-byte identity.
+6. Compare every readback byte with the generated image using `cmp` or Windows `fc.exe /b`.
 7. Disconnect the programmer, restore normal power, and observe boot and USB enumeration.

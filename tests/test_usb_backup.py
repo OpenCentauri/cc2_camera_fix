@@ -11,12 +11,7 @@ import zipfile
 import zlib
 
 
-TOOL_PATH = Path(__file__).parents[1] / "cc2_sig_tool.py"
-SPEC = importlib.util.spec_from_file_location("cc2_sig_tool", TOOL_PATH)
-assert SPEC is not None and SPEC.loader is not None
-tool = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = tool
-SPEC.loader.exec_module(tool)
+from cc2flash import image as tool
 
 
 def usb_manifest(image: bytes) -> dict:
@@ -187,29 +182,13 @@ class ConfigModeTests(unittest.TestCase):
             tool.decode_jffs2_fragment(node, b"expanding-zlib")
 
     def test_wipe_override_is_clean_data_only(self):
-        with self.assertRaisesRegex(tool.ValidationError, "clean-data"):
+        with self.assertRaisesRegex(tool.ValidationError, "serial-only"):
             tool.build_recovery(
                 Path("unused.bin"),
                 Path("unused-output"),
                 confirmation_paths=[],
-                keep_config=False,
-                config_mode="preserve-data",
+                config_mode="preserve-files",
                 wipe_unknown_config=True,
-                overwrite=False,
-                show_serial=False,
-                allow_fewer_reads=False,
-            )
-
-    def test_keep_config_cannot_be_combined_with_preserve_data(self):
-        with self.assertRaisesRegex(tool.ValidationError, "cannot be combined"):
-            tool.build_recovery(
-                Path("unused.bin"),
-                Path("unused-output"),
-                confirmation_paths=[],
-                keep_config=True,
-                config_mode="preserve-data",
-                wipe_unknown_config=False,
-                overwrite=False,
                 show_serial=False,
                 allow_fewer_reads=False,
             )

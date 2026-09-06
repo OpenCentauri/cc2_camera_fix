@@ -40,7 +40,7 @@ EXPECTED_PARTITIONS = (
     ("config", 0x020000),
 )
 
-# Keep these aligned with hardware-recovery/cc2_sig_tool.py.  Three matching
+# Keep these aligned with cc2flash/image.py.  Three matching
 # physical reads are the repository-wide minimum for a non-reference image.
 # USB acquisition gets two extra chances because live testing showed JFFS2 may
 # still change immediately after the one-shot ADB startup command.
@@ -66,7 +66,7 @@ BACKUP_ARCHIVE_MEMBERS = frozenset(
 )
 MAX_MANIFEST_SIZE = 1024 * 1024
 
-# hardware-recovery/cc2_sig_tool.py is intentionally allowed to change only
+# cc2flash/image.py is intentionally allowed to change only
 # its audited SquashFS window and the writable config partition.  Restore uses
 # these boundaries to prove that a candidate still belongs to the camera whose
 # preserved USB backup authorizes the write.
@@ -146,7 +146,11 @@ class AdbClient:
         try:
             result = subprocess.run(command, capture_output=True, timeout=timeout, check=False)
         except FileNotFoundError as exc:
-            raise ProtocolError(f"ADB executable not found: {self.executable}") from exc
+            raise ProtocolError(
+                f"ADB executable not found: {self.executable}. "
+                "Install Google SDK Platform Tools, then pass --adb with the path to adb. "
+                "Setup: https://github.com/phryneas/cc2_camera_fix/blob/main/docs/INSTALLATION.md"
+            ) from exc
         except subprocess.TimeoutExpired as exc:
             raise ProtocolError(f"ADB command timed out: {' '.join(command)}") from exc
         if result.returncode:
@@ -263,7 +267,11 @@ class AdbClient:
                 command, capture_output=True, timeout=timeout, check=False
             )
         except FileNotFoundError as exc:
-            raise ProtocolError(f"ADB executable not found: {self.executable}") from exc
+            raise ProtocolError(
+                f"ADB executable not found: {self.executable}. "
+                "Install Google SDK Platform Tools, then pass --adb with the path to adb. "
+                "Setup: https://github.com/phryneas/cc2_camera_fix/blob/main/docs/INSTALLATION.md"
+            ) from exc
         except subprocess.TimeoutExpired as exc:
             raise ProtocolError(f"ADB availability check timed out: {' '.join(command)}") from exc
         state = result.stdout.decode("utf-8", "replace").strip()

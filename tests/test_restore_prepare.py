@@ -192,7 +192,7 @@ class RestoreOrderingTests(unittest.TestCase):
             path = Path(directory) / "candidate.bin"
             path.write_bytes(b"candidate")
             args = cli.parser().parse_args([
-                "restore", str(path), "--backup", "backup.zip", "--no-post-verify"
+                "restore", str(path), "--backup", "backup.zip"
             ])
             events = []
             stack.enter_context(mock.patch.object(cli, "load_preserved_backup", return_value=(b"backup", {"sha256": "x"})))
@@ -201,6 +201,9 @@ class RestoreOrderingTests(unittest.TestCase):
             stack.enter_context(mock.patch.object(cli, "build_update_blob", return_value=(b"blob", None)))
             for name in ("validate_preparation_image", "_confirm", "prepare_restore", "enter_bootloader", "wait_for_hid", "restore_blob"):
                 stack.enter_context(mock.patch.object(cli, name, side_effect=lambda *a, _name=name, **k: events.append(_name)))
+            stack.enter_context(mock.patch.object(cli, "_adb", return_value=mock.Mock()))
+            stack.enter_context(mock.patch.object(cli, "acquire_stable", return_value=(b"candidate", {})))
+            stack.enter_context(mock.patch.object(cli, "validate_post_restore_readback", return_value=True))
             stack.enter_context(redirect_stdout(io.StringIO()))
             self.assertEqual(cli.command_restore(args), 0)
             self.assertEqual(events, ["validate_preparation_image", "_confirm", "prepare_restore", "enter_bootloader", "wait_for_hid", "restore_blob", "wait_for_hid"])
@@ -226,9 +229,9 @@ class RestoreOrderingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
             path = Path(directory) / "candidate.bin"
             path.write_bytes(b"candidate")
-            args = cli.parser().parse_args(["restore", str(path), "--backup", "backup.zip", "--yes"])
+            args = cli.parser().parse_args(["restore", str(path), "--backup", "backup.zip"])
             stack.enter_context(mock.patch.object(cli, "load_preserved_backup", return_value=(b"backup", {"sha256": "x"})))
-            for name in ("validate_full_restore_image", "validate_replacement_against_backup", "validate_preparation_image"):
+            for name in ("validate_full_restore_image", "validate_replacement_against_backup", "validate_preparation_image", "_confirm"):
                 stack.enter_context(mock.patch.object(cli, name))
             stack.enter_context(mock.patch.object(cli, "build_update_blob", return_value=(b"blob", None)))
             prepare = stack.enter_context(mock.patch.object(cli, "prepare_restore", side_effect=ProtocolError("refused")))

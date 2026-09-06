@@ -1010,3 +1010,4 @@ def decode_boot_terminal_status(frame: BootFrame | bytes) -> bool:
     if parsed.payload not in (b"\x00", b"\x01"):
         raise ProtocolError("bootloader type 5 payload must be one byte 00 or 01")
     return parsed.payload == b"\x01"
+
