@@ -8,8 +8,9 @@ the stock Elegoo Centauri Carbon 2 camera firmware found in the supplied
 
 > **Research status:** the library now decodes bootloader type-2 ACK payloads as
 > `u32le(next_expected_packet)` and rejects unexpected/retry requests instead of
-> treating them as zero. Destructive restore is still hardware-unverified, and
-> automatic retransmission is not implemented. Preserve a three-read backup and
+> treating them as zero. The manual RAM-patched restore sequence has passed a
+> physical test; automated preparation still needs hardware validation. Automatic
+> retransmission is not implemented. Preserve a three-read backup and
 > read `PROTOCOL.md`, sections 9, 10, and 12 before considering a write.
 
 The important result is that the bootloader USB updater is **write-only**. It
@@ -273,7 +274,13 @@ cc2flash backup --serial Ucamera001 backup.zip
 
 The exact serial exposed by ADB may differ; use `cc2flash list` to inspect it.
 
-## Intended restore workflow (not hardware-ready)
+## Restore workflow (automated preparation awaits hardware validation)
+
+See [SFC restore preparation](SFC-RESTORE-PREPARATION.md) for the exact kernel
+gate, pointer derivation, failure behavior, and hardware evidence. Connect only
+one ADB device and one normal-mode camera HID interface. Their serials must
+match. Root ADB must already be online; use the separate `start-adb` command
+if necessary. Restore does not start ADB automatically before writing the flag.
 
 Validate a candidate without opening USB:
 
@@ -297,11 +304,16 @@ implement:
 cc2flash restore fixed.bin --backup backup.zip
 ```
 
-The command is intended to print the complete target range and hashes, then
-require the literal confirmation `RESTORE-CC2`. Its planned phases are:
+The command prints the complete target range and hashes, then requires the
+literal confirmation `RESTORE-CC2` unless `--yes` was supplied. Its phases are:
 
 1. Validate `fixed.bin` and both members of `backup.zip` locally.
-2. Send the 8-byte upgrade flag through normal Linux HID.
+2. Require the known kernel, three consecutive identical live reads, and a
+   match to the preserved backup outside the audited recovery regions. Validate
+   root/MTD geometry, kernel symbols/instructions, and the runtime SFC pointer.
+   Sync, set the internal erase size to `0x1000`, and verify it before sending
+   the stock 8-byte upgrade flag through normal Linux HID. No manual config
+   erase or process suspension is performed; `0x4000` is not restored in RAM.
 3. Wait for bootloader HID `a108:ff08`.
 4. Transfer a 128-byte update header plus the image in numbered packets.
 5. Require the bootloader's whole-image MD5 success indication.
@@ -343,8 +355,10 @@ image is then the intended recovery path.
   acquisition failed its equality gate while live state was settling; a later
   invocation produced matching full reads. The client now requires three
   consecutive matches within five attempts.
-- Bootloader data ACK parsing now matches the disassembly for in-order packets,
-  but automatic retransmission and physical-camera validation remain absent.
+- Bootloader data ACK parsing matches the disassembly for in-order packets.
+  A manual RAM-patched restore completed on one camera, including three-read
+  post-verification. Automated preparation and other revisions still need
+  hardware validation; automatic retransmission is not implemented.
 - The explicit persistent ADB recovery overwrites a startup hook before the
   first backup; the temporary upload-command route avoids that file but deliberately
   relies on a vendor command-injection bug. That temporary startup has now been

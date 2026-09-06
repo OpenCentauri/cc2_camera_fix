@@ -11,6 +11,7 @@ import sys
 import time
 
 from . import __version__
+from .restore_prepare import prepare_restore, validate_preparation_image
 from .adb_backup import (
     AdbClient,
     AdbUnavailable,
@@ -303,6 +304,7 @@ def _confirm(image_path: Path, image_hashes: dict, backup_path: Path) -> None:
     print(f"Range:  0x000000-0x{FLASH_SIZE - 1:06x}")
     print(f"SHA256: {image_hashes['sha256']}")
     print(f"Backup: {backup_path}")
+    print("Requires online root ADB; temporarily sets the driver erase size to 4 KiB.")
     phrase = input("Type RESTORE-CC2 to continue: ")
     if phrase != "RESTORE-CC2":
         raise ProtocolError("confirmation did not match; nothing was written")
@@ -339,9 +341,12 @@ def command_restore(args) -> int:
     if image_hashes["sha256"] == backup_hashes["sha256"]:
         print("Note: replacement image is byte-identical to the preserved backup.")
     blob, plan = build_update_blob(image)
+    validate_preparation_image(backup_image)
     if not args.yes:
         _confirm(image_path, image_hashes, backup_path)
 
+    print("Validating the live camera and preparing its temporary SFC erase size.")
+    prepare_restore(_adb(args), backup_image, progress=_read_progress)
     print("Entering bootloader HID mode; the 8-byte flag write begins now.")
     enter_bootloader()
     wait_for_hid(BOOT_VID, BOOT_HID_PID, timeout=args.enumeration_timeout)
@@ -514,7 +519,13 @@ def parser() -> argparse.ArgumentParser:
     )
     plan.set_defaults(func=command_plan)
 
-    restore = commands.add_parser("restore", parents=[common], help="restore one full 8 MiB image")
+    restore = commands.add_parser(
+        "restore", parents=[common],
+        help="restore one full 8 MiB image; requires online root ADB",
+        description=("Requires online root ADB and a preserved backup. Temporarily "
+                     "sets the known stock SFC driver erase size to 4 KiB before "
+                     "the stock HID flag write; does not manually erase config."),
+    )
     restore.add_argument("image")
     restore.add_argument(
         "--backup",
