@@ -25,7 +25,6 @@ cc2flash backup OUTPUT.zip [--adb EXECUTABLE] [--serial SERIAL]
 - `install-adb-startup`: overwrite `/etc/conf.d/system.sh` with the known
   ADB startup content. Requires `ENABLE-ADB` confirmation or `--yes`.
   Restart manually afterward; successful installation exits with status 0.
-  It also installs the hook when temporary ADB is already online.
 - `backup`: require three consecutive identical full reads within five
   attempts, then publish a new ZIP atomically. Never overwrites a backup.
   If ADB is offline, explicitly start it and rerun backup; backup itself is
@@ -103,8 +102,7 @@ cc2flash restore IMAGE --backup BACKUP.zip [--dry-run]
 
 `--dry-run` validates the candidate, preserved backup, allowed changes, known
 preparation kernel, and transfer representation entirely offline. It opens no
-transport and writes nothing. It accepts the same hardware options as a real
-restore, but does not use or require them.
+transport and writes nothing.
 It cannot certify the live camera or predict successful physical writing.
 
 A real restore repeats local validation, requires the user to type `RESTORE-CC2`,
