@@ -31,9 +31,9 @@ This is a useful isolation test, not proof of this exact flash failure. The buil
 
 ## What this repair requires
 
-This is a hardware recovery. You must read and rewrite the camera's eight-pin SPI flash memory with an external programmer.
+For a failed camera, read and rewrite the eight-pin SPI flash with an external programmer. A working camera can use the USB prevention workflow in the main guide. Both use the same image builder.
 
-The recommended beginner setup is:
+The recommended setup is:
 
 - a CH341A/CH341B USB programmer that has been verified for 3.3 V operation;
 - an SOIC-8 test clip and cable, allowing the chip to be accessed on the camera board;
@@ -75,7 +75,7 @@ The input window, compressed fragment, decompressed fragment, original `bashrc.s
 
 ### Config recovery modes
 
-`clean-data` is the default and retains the original recovery behavior. The
+`serial-only` is the default. The
 builder extracts the camera's own CRC-valid `serial.cfg` and creates a minimal
 128 KiB JFFS2 partition containing:
 
@@ -93,7 +93,7 @@ config contents too, add `--wipe-unknown-config`. That override still preserves
 and cross-checks `serial.cfg`; it is not permission to ignore identity or
 firmware validation failures.
 
-`preserve-data` instead resolves the current root-directory view and recreates
+`preserve-files` instead resolves the current root-directory view and recreates
 every live regular file once in a fresh compact JFFS2 image. It preserves file
 contents, mode, owner, timestamps, flags, inode identity, and directory-entry
 metadata, while dropping obsolete/dead historical nodes. It supports
@@ -164,9 +164,9 @@ The validator therefore performs the strongest safe equivalent of “100% match 
 4. The excluded fields are still validated:
    - the UOID must have the expected 94-byte structure;
    - `config` must contain CRC-valid JFFS2 nodes;
-   - clean-data accepts only the six known filenames unless
+   - serial-only accepts only the six known filenames unless
      `--wipe-unknown-config` is explicit;
-   - preserve-data accepts additional live names only when every entry can be
+   - preserve-files accepts additional live names only when every entry can be
      safely reconstructed as a regular root file;
    - exactly one unambiguous `serial.cfg` value must be recoverable;
    - the serial and UOID must share the expected 12-byte unit prefix.
@@ -177,7 +177,7 @@ No other differences are accepted. See `REFERENCE_FINGERPRINTS.json`.
 
 The builder:
 
-- can require any additional physical reads supplied with `--confirm` to be byte-for-byte identical;
+- can require any additional physical reads supplied with `--confirm-read` to be byte-for-byte identical;
 - requires three identical reads for a non-reference unit unless reduced confidence is explicitly accepted;
 - refuses files that are not exactly 8 MiB;
 - validates exact hashes for every invariant segment;
@@ -186,9 +186,8 @@ The builder:
 - preserves the entire input HWCONFIG partition;
 - preserves the original serial payload;
 - validates the generated JFFS2 image by parsing it again, including a complete
-  content/metadata round trip in preserve-data mode;
-- refuses `--keep-config` for a noncanonical/exhausted partition;
-- refuses ambiguous, unsupported, or oversized preserve-data layouts;
+  content/metadata round trip in preserve-files mode;
+- refuses ambiguous, unsupported, or oversized preserve-files layouts;
 - refuses unsafe output-directory reuse that could delete inputs or unrelated files;
 - validates the complete generated recovery image again;
 - proves no bytes changed outside the selected patch/config regions;

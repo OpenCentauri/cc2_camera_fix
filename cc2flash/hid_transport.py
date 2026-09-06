@@ -51,7 +51,8 @@ def _hid_module():
         import hid  # type: ignore
     except ImportError as exc:
         raise ProtocolError(
-            "USB support requires the optional 'hidapi' Python package"
+            "HID support could not load. Reinstall the complete cc2flash package "
+            "or download the Windows executable from the project's GitHub Releases."
         ) from exc
     return hid
 

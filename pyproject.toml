@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cc2flash"
+dynamic = ["version"]
+description = "Backup, repair and restore the Elegoo CC2 stock camera"
+requires-python = ">=3.10"
+dependencies = ["hidapi>=0.14"]
+
+[project.scripts]
+cc2flash = "cc2flash.cli:main"
+
+[tool.setuptools]
+packages = ["cc2flash"]
+license-files = ["hardware-recovery/LICENSE"]
+
+[tool.setuptools.dynamic]
+version = {attr = "cc2flash.__version__"}

@@ -50,22 +50,12 @@ updater. Read `source-reconstruction/README.md` before relying on it.
 
 ## Install
 
-Python 3.10 or newer is required. Backup also requires the Android platform
-`adb` executable. Normal-HID ADB recovery and restore support use the optional
-`hidapi` package.
+Follow the [installation guide](../docs/INSTALLATION.md).
+The Windows executable includes Python and HID support; ADB is installed
+separately. The complete command syntax is in the [CLI reference](../docs/CLI.md).
 
-```sh
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e '.[usb]'
-```
-
-For inspection and backup when ADB is already running, the package itself has
-no Python dependencies:
-
-```sh
-python -m pip install -e .
-```
+For contributor installation, run `python -m pip install -e .` at the repository
+root. Run the offline suite there with `python -m unittest discover -s tests -v`.
 
 ## Public Python command API
 
@@ -123,8 +113,8 @@ reports mutate the device; building them does not.
 Connect exactly one camera in normal USB mode, then:
 
 ```sh
-cc2flash list
-cc2flash info
+cc2flash devices
+cc2flash device-info
 cc2flash backup backup.zip
 ```
 
@@ -178,7 +168,7 @@ the literal confirmation `ENABLE-ADB`. It then sends:
 3. `0x3200`, final frame — upload the exact 11 bytes `/bin/adbd &`; and
 4. `0x3300` — remove any old target, write the file, and chmod it `0777`.
 
-The command then exits with status `3`. It has not read flash or created a
+The command then exits successfully with status `0`. It has not read flash or created a
 backup. Restart or power-cycle the camera, wait for normal USB mode, and run
 `cc2flash backup backup.zip`; `rcS` will start `adbd` during boot.
 
@@ -193,8 +183,9 @@ download or preserve the previous file. A missing local `adb` executable,
 multiple/unauthorized ADB devices, a non-root shell, or a wrong MTD map does not
 trigger either ADB-start command.
 
-Both ADB-start commands are no-ops when the selected ADB device is already
-online. `backup` never invokes either command automatically.
+`start-adb` is a no-op when the selected ADB device is already online.
+`install-adb-startup` still installs the persistent hook for future boots.
+`backup` never invokes either command automatically.
 
 `backup` requires the exact recovered partition sequence and sizes:
 
@@ -221,7 +212,7 @@ prints the exact observed hash. After independently reviewing it, that one
 value can be accepted explicitly:
 
 ```sh
-cc2flash backup --accept-bootloader-hash <observed-sha256> backup.zip
+cc2flash backup --accept-bootloader-sha256 <observed-sha256> backup.zip
 ```
 
 The supplied value must exactly match the newly observed hash. Only then does
@@ -245,8 +236,8 @@ Pass the unmodified ZIP directly to the hardware-recovery builder; its embedded
 three-consecutive-read evidence satisfies that tool's physical-read gate:
 
 ```sh
-python ../hardware-recovery/cc2_sig_tool.py analyze backup.zip
-python ../hardware-recovery/cc2_sig_tool.py build backup.zip
+cc2flash inspect-image backup.zip
+cc2flash build-image backup.zip
 ```
 
 The builder writes
@@ -257,7 +248,7 @@ evidence required by restore.
 Validate the resulting pair without opening USB:
 
 ```sh
-cc2flash plan-restore \
+cc2flash restore --dry-run \
   backup-cc2-recovery/cc2-camera-recovery.bin \
   --backup backup.zip
 ```
@@ -275,7 +266,7 @@ If ADB lists more than one device, pass the camera serial explicitly:
 cc2flash backup --serial Ucamera001 backup.zip
 ```
 
-The exact serial exposed by ADB may differ; use `cc2flash list` to inspect it.
+The exact serial exposed by ADB may differ; use `cc2flash devices` to inspect it.
 
 ## Restore workflow (physically validated on the supported camera)
 
@@ -287,7 +278,7 @@ kernel gate, runtime pointer derivation, failure behavior, and hardware evidence
 Validate a candidate without opening USB:
 
 ```sh
-cc2flash plan-restore fixed.bin --backup backup.zip
+cc2flash restore --dry-run fixed.bin --backup backup.zip
 ```
 
 A full restore requires exactly `0x800000` bytes.  It also rejects an image
@@ -314,7 +305,7 @@ validation are recorded in [PHYSICAL-VALIDATION.md](PHYSICAL-VALIDATION.md) and
 [SFC-RESTORE-PREPARATION.md](SFC-RESTORE-PREPARATION.md).
 
 The command prints the complete target range and hashes, then requires the
-literal confirmation `RESTORE-CC2` unless `--yes` was supplied. Its phases are:
+literal confirmation `RESTORE-CC2` for every real restore. Its phases are:
 
 1. Validate `fixed.bin` and both members of `backup.zip` locally.
 2. Require the known kernel, three consecutive identical live reads, and a
@@ -333,16 +324,12 @@ literal confirmation `RESTORE-CC2` unless `--yes` was supplied. Its phases are:
    images over ADB.
 8. Require every boot-stable byte from `0x000000` through the end of HWCONFIG at
    `0x7dffff` to match `fixed.bin`. Report whether config also stayed exact;
-   clean-data images legitimately create default config files during this boot.
+   serial-only images legitimately create default config files during this boot.
 
 The bootloader reports MD5 acceptance **before** erase/write and offers no
-post-write status or readback. An independently available ADB or programmer
-read is therefore required for end-to-end verification. `--no-post-verify`
-gives up that assurance.
+post-write status or readback. ADB readback is therefore mandatory for a successful USB restore.
 
-Consent to the flash write and consent to start ADB are separate. `restore
---yes` skips only the typed `RESTORE-CC2` write confirmation. It does not answer
-the later ADB question. Empty or negative input, and non-interactive stdin, send
+Consent to the flash write and consent to start ADB are separate. Both require interactive confirmation. Empty or negative input, and non-interactive stdin, send
 no ADB-start HID command and leave the completed restore explicitly
 unverified.
 
@@ -408,7 +395,7 @@ boot-hash gating, create-if-absent ZIP publication, strict v2 manifest parsing
 including JSON decoder-limit failures,
 unsupported-compression rejection, both explicit ADB startup commands,
 hardware-recovery region compatibility, boot-stable post-write comparison,
-separately confirmed temporary ADB startup after a clean-data restore, and
+separately confirmed temporary ADB startup after a serial-only restore, and
 pre-USB wrong-unit rejection,
 bounded/validated availability timeouts, expected final-commit
 failure/disconnection, the Windows `error: closed`

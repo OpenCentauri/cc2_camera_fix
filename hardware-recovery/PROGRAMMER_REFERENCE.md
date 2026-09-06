@@ -50,7 +50,7 @@ All-`00`, all-`FF`, unstable, differently hashed, wrong-size, or intermittently 
 Build the recovery image from those reads:
 
 ```bat
-py cc2_sig_tool.py build cc2-camera-1.bin --confirm cc2-camera-2.bin cc2-camera-3.bin
+cc2flash build-image cc2-camera-1.bin --confirm-read cc2-camera-2.bin --confirm-read cc2-camera-3.bin
 ```
 
 #### Full-chip erase, program, and verify
@@ -65,7 +65,7 @@ py cc2_sig_tool.py build cc2-camera-1.bin --confirm cc2-camera-2.bin cc2-camera-
 8. Verify that readback with the recovery tool:
 
 ```bat
-py cc2_sig_tool.py verify cc2-camera-1-cc2-recovery\cc2-camera-recovery.bin cc2-camera-readback.bin
+fc.exe /b cc2-camera-1-cc2-recovery\cc2-camera-recovery.bin cc2-camera-readback.bin
 ```
 
 Only after the tool reports a byte-for-byte match should you unplug the CH341 programmer, remove the clip, reconnect normal camera power, and test boot/USB enumeration.

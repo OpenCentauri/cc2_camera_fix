@@ -7,7 +7,7 @@ NeoProgrammer workflow with one required command-line invocation.
 
 For details beyond that normal path:
 
-- [CLI reference](CLI_REFERENCE.md) documents inspection, alternate build
+- [CLI reference](../docs/CLI.md) documents inspection, alternate build
   modes, output files, and independent readback verification.
 - [Technical details](TECHNICAL_DETAILS.md) document the root cause, exact
   firmware transformation, supported image family, identity handling, safety
@@ -16,4 +16,5 @@ For details beyond that normal path:
   electrical mapping and the Bus Pirate alternative.
 - [Independent verification](CC2_RECOVERY_VERIFICATION.md) and
   [regression results](TEST_RESULTS.md) record the current evidence.
+
 

@@ -11,6 +11,8 @@ import sys
 import time
 
 from . import __version__
+from . import image as image_tools
+from .display import invocation
 from .restore_prepare import prepare_restore, validate_preparation_image
 from .adb_backup import (
     AdbClient,
@@ -158,10 +160,10 @@ def command_backup(args) -> int:
 
     bootloader = manifest["bootloader"]
     observed = str(bootloader["sha256"])
-    accepted = args.accept_bootloader_hash
+    accepted = args.accept_bootloader_sha256
     if accepted is not None and accepted != observed:
         raise ProtocolError(
-            "--accept-bootloader-hash does not match the observed boot partition: "
+            "--accept-bootloader-sha256 does not match the observed boot partition: "
             f"observed {observed}"
         )
     if bootloader["known_reference"]:
@@ -170,7 +172,7 @@ def command_backup(args) -> int:
         bootloader["acceptance"] = "explicit-hash"
     else:
         rerun = _common_command(args, "backup")
-        rerun += ["--accept-bootloader-hash", observed, str(output)]
+        rerun += ["--accept-bootloader-sha256", observed, str(output)]
         raise ProtocolError(
             "unknown bootloader SHA-256; no backup was published:\n"
             f"  {observed}\n"
@@ -193,6 +195,8 @@ def command_backup(args) -> int:
     )
     print(f"Saved archive: {archive_path}")
     print("Archive members: flash.bin, manifest.json")
+    print("Next, build this camera's recovery image:")
+    print(invocation("build-image", str(archive_path)))
     return 0
 
 
@@ -223,7 +227,8 @@ def command_start_adb(args) -> int:
     identity, _parts = adb.identity_and_partitions()
     print(f"ADB started for this boot. Root identity: {identity}")
     print("No flash backup was read and no persistent startup file was installed.")
-    print("Now run cc2flash backup <output.zip>.")
+    print("Next:")
+    print(invocation(*_common_command(args, "backup")[1:], "backup.zip"))
     return 0
 
 
@@ -236,9 +241,8 @@ def command_install_adb_startup(args) -> int:
     except AdbUnavailable as unavailable:
         print(f"ADB is unavailable: {unavailable}", file=sys.stderr)
     else:
-        print("ADB is already online; no persistent startup file was installed.")
-        print("You can now run cc2flash backup <output.zip>.")
-        return 0
+        identity, _parts = adb.identity_and_partitions()
+        print(f"ADB is online. Installing startup for future boots. Identity: {identity}")
 
     print("Persistent ADB installation will modify the camera:", file=sys.stderr)
     print(f"  overwrite {ADB_STARTUP_PATH}", file=sys.stderr)
@@ -247,7 +251,7 @@ def command_install_adb_startup(args) -> int:
         f"{ADB_STARTUP_CONTENT.decode('ascii')}",
         file=sys.stderr,
     )
-    print("No flash backup can be read until after a manual restart.", file=sys.stderr)
+    print("The startup hook takes effect on the next boot.", file=sys.stderr)
 
     if not args.yes:
         if not sys.stdin.isatty():
@@ -264,7 +268,7 @@ def command_install_adb_startup(args) -> int:
     print("No flash was read and no backup file was created.")
     print("Restart or power-cycle the camera, wait for normal USB mode, then run:")
     print("  " + " ".join(_common_command(args, "backup")) + " <output.zip>")
-    return 3
+    return 0
 
 
 def command_plan(args) -> int:
@@ -276,6 +280,7 @@ def command_plan(args) -> int:
     if backup_path is not None:
         backup_image, backup_hashes = load_preserved_backup(backup_path)
         validate_replacement_against_backup(image, backup_image)
+        validate_preparation_image(backup_image)
     blob, plan = build_update_blob(image)
     result = {
         "image": str(image_path),
@@ -299,6 +304,8 @@ def command_plan(args) -> int:
 
 
 def _confirm(image_path: Path, image_hashes: dict, backup_path: Path) -> None:
+    if not sys.stdin.isatty():
+        raise ProtocolError("restore requires an interactive RESTORE-CC2 confirmation; nothing was written")
     print("WRITE OPERATION")
     print(f"Input:  {image_path}")
     print(f"Range:  0x000000-0x{FLASH_SIZE - 1:06x}")
@@ -331,6 +338,8 @@ def _confirm_temporary_adb_for_readback() -> None:
 
 
 def command_restore(args) -> int:
+    if args.dry_run:
+        return command_plan(args)
     image_path = Path(args.image)
     backup_path = Path(args.backup)
     backup_image, backup_hashes = load_preserved_backup(backup_path)
@@ -342,14 +351,13 @@ def command_restore(args) -> int:
         print("Note: replacement image is byte-identical to the preserved backup.")
     blob, plan = build_update_blob(image)
     validate_preparation_image(backup_image)
-    if not args.yes:
-        _confirm(image_path, image_hashes, backup_path)
+    _confirm(image_path, image_hashes, backup_path)
 
     print("Validating the live camera and preparing its temporary SFC erase size.")
     prepare_restore(_adb(args), backup_image, progress=_read_progress)
     print("Entering bootloader HID mode; the 8-byte flag write begins now.")
     enter_bootloader()
-    wait_for_hid(BOOT_VID, BOOT_HID_PID, timeout=args.enumeration_timeout)
+    wait_for_hid(BOOT_VID, BOOT_HID_PID, timeout=args.bootloader_timeout)
 
     last_percent = -1
 
@@ -364,10 +372,6 @@ def command_restore(args) -> int:
     print("Bootloader accepted the image MD5 and has started erase/write.")
     print("Do not disconnect power; waiting for normal-mode USB to return.")
     wait_for_hid(NORMAL_VID, NORMAL_PID, timeout=args.reboot_timeout)
-
-    if args.no_post_verify:
-        print("Normal mode returned. Post-write readback was explicitly skipped.")
-        return 0
 
     print(
         "Normal mode returned; requiring three consecutive identical flash "
@@ -447,117 +451,64 @@ def command_restore(args) -> int:
 def parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--adb", default="adb", help="ADB executable (default: adb)")
-    common.add_argument("--serial", help="ADB device serial")
+    common.add_argument("--serial", help="ADB device serial; not the camera's embedded identity")
 
-    result = argparse.ArgumentParser(prog="cc2flash")
+    result = argparse.ArgumentParser(prog="cc2flash", description="Back up, inspect, repair and restore the supported Elegoo CC2 stock camera.")
     result.add_argument("--version", action="version", version=__version__)
     commands = result.add_subparsers(dest="command", required=True)
 
-    list_parser = commands.add_parser("list", parents=[common], help="list USB/ADB devices; read-only")
-    list_parser.set_defaults(func=command_list)
-
-    info = commands.add_parser("info", parents=[common], help="validate and show MTD layout; read-only")
+    devices = commands.add_parser("devices", help="list USB/ADB devices; read-only")
+    devices.add_argument("--adb", default="adb", help="ADB executable (default: adb)")
+    devices.set_defaults(func=command_list, serial=None)
+    info = commands.add_parser("device-info", parents=[common], help="validate root ADB and show flash layout; read-only")
     info.set_defaults(func=command_info)
 
-    backup = commands.add_parser(
-        "backup",
-        parents=[common],
-        help=(
-            "require three consecutive identical flash reads within five attempts; "
-            "strictly read-only"
-        ),
-    )
-    backup.add_argument(
-        "output",
-        help="single ZIP archive to publish; must end in .zip",
-    )
-    backup.add_argument(
-        "--accept-bootloader-hash",
-        type=_sha256_argument,
-        help=(
-            "accept one reviewed unknown boot-partition SHA-256; the supplied "
-            "value must exactly match the observed hash"
-        ),
-    )
+    backup = commands.add_parser("backup", parents=[common], help="save three consecutive identical flash reads; read-only")
+    backup.add_argument("output", help="new backup archive ending in .zip")
+    backup.add_argument("--accept-bootloader-sha256", type=_sha256_argument,
+                        help="accept exactly one independently reviewed unknown boot-partition SHA-256")
     backup.set_defaults(func=command_backup)
 
-    start_adb = commands.add_parser(
-        "start-adb",
-        parents=[common],
-        help=(
-            "start root ADB temporarily through normal HID; no persistent file"
-        ),
-    )
-    start_adb.add_argument(
-        "--timeout",
-        type=_positive_finite_duration,
-        default=30,
-        help="seconds to wait for ADB after temporary HID startup (default: 30)",
-    )
-    start_adb.set_defaults(func=command_start_adb)
+    start = commands.add_parser("start-adb", parents=[common], help="start root ADB for this boot; no persistent file")
+    start.add_argument("--timeout", type=_positive_finite_duration, default=30, help="ADB startup wait in seconds (default: 30)")
+    start.set_defaults(func=command_start_adb)
+    install = commands.add_parser("install-adb-startup", parents=[common], help="overwrite the persistent ADB startup hook; restart required")
+    install.add_argument("--yes", action="store_true", help="consent to overwrite the startup hook without typing ENABLE-ADB")
+    install.set_defaults(func=command_install_adb_startup)
 
-    install_adb = commands.add_parser(
-        "install-adb-startup",
-        parents=[common],
-        help="persistently install /etc/conf.d/system.sh; restart required",
-    )
-    install_adb.add_argument(
-        "--yes",
-        action="store_true",
-        help="skip typed ENABLE-ADB confirmation",
-    )
-    install_adb.set_defaults(func=command_install_adb_startup)
+    inspect = commands.add_parser("inspect-image", help="validate a raw dump or backup ZIP; offline, no output files")
+    build = commands.add_parser("build-image", help="build a camera-specific recovery bundle; offline")
+    for command in (inspect, build):
+        command.add_argument("image", metavar="INPUT", help="raw 8 MiB dump or unmodified cc2flash backup ZIP")
+        command.add_argument("--confirm-read", action="append", default=[], metavar="DUMP",
+                             help="additional independent read that must match; repeat for each file")
+        command.add_argument("--show-identifiers", action="store_true", help="show full unit identifiers in the analysis report")
+    inspect.set_defaults(func=image_tools.cmd_analyze)
+    build.add_argument("-o", "--output", metavar="DIR", help="new output directory (default: <input-stem>-cc2-recovery)")
+    build.add_argument("--config-mode", choices=("serial-only", "preserve-files"), default="serial-only",
+                       help="rebuild only serial.cfg or all supported live files (default: serial-only)")
+    build.add_argument("--wipe-unknown-config", action="store_true", help="with serial-only, explicitly discard unfamiliar config names")
+    build.add_argument("--allow-fewer-reads", action="store_true", help="explicitly accept fewer than three matching reads; other validation remains mandatory")
+    build.set_defaults(func=image_tools.cmd_build)
 
-    plan = commands.add_parser("plan-restore", help="validate and describe an image; no USB writes")
-    plan.add_argument("image")
-    plan.add_argument(
-        "--backup",
-        help=(
-            "preserved cc2flash ZIP; also prove the image differs only in "
-            "hardware-recovery's audited regions"
-        ),
-    )
-    plan.set_defaults(func=command_plan)
-
-    restore = commands.add_parser(
-        "restore", parents=[common],
-        help="restore one full 8 MiB image; requires online root ADB",
-        description=("Requires online root ADB and a preserved backup. Temporarily "
-                     "sets the known stock SFC driver erase size to 4 KiB before "
-                     "the stock HID flag write; does not manually erase config."),
-    )
-    restore.add_argument("image")
-    restore.add_argument(
-        "--backup",
-        required=True,
-        help="preserved cc2flash .zip archive",
-    )
-    restore.add_argument("--yes", action="store_true", help="skip typed confirmation")
-    restore.add_argument("--no-post-verify", action="store_true", help="skip normal-mode ADB readback")
-    restore.add_argument(
-        "--enumeration-timeout", type=_positive_finite_duration, default=30
-    )
-    restore.add_argument(
-        "--reboot-timeout", type=_positive_finite_duration, default=180
-    )
-    restore.add_argument(
-        "--adb-timeout",
-        type=_positive_finite_duration,
-        default=60,
-        help=(
-            "seconds to wait for ADB to become online before post-write "
-            "verification starts (default: 60; does not cap the reads)"
-        ),
-    )
+    restore = commands.add_parser("restore", parents=[common], help="write and verify a full camera image, or check it offline with --dry-run")
+    restore.add_argument("image", metavar="IMAGE")
+    restore.add_argument("--backup", required=True, metavar="BACKUP.zip", help="preserved three-read cc2flash backup archive")
+    restore.add_argument("--dry-run", action="store_true", help="local validation only; no USB or ADB access")
+    restore.add_argument("--bootloader-timeout", type=_positive_finite_duration, default=30, help="bootloader USB wait in seconds (default: 30)")
+    restore.add_argument("--reboot-timeout", type=_positive_finite_duration, default=180, help="normal USB return wait in seconds (default: 180)")
+    restore.add_argument("--adb-timeout", type=_positive_finite_duration, default=60, help="post-write ADB availability wait, not the read duration (default: 60)")
     restore.set_defaults(func=command_restore)
     return result
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parser().parse_args(argv)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    command_parser = parser()
+    args = command_parser.parse_args(argv)
     try:
-        return int(args.func(args))
-    except (ProtocolError, OSError) as exc:
+        return int(args.func(args) or 0)
+    except (ProtocolError, image_tools.ValidationError, OSError, EOFError) as exc:
         print(f"cc2flash: error: {exc}", file=sys.stderr)
         return 2
 

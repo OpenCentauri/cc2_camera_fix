@@ -244,3 +244,4 @@ def validate_full_restore_image(image: bytes) -> None:
             "image contains the persistent upgrade magic at 0x7f8000 and would boot-loop"
         )
 
+

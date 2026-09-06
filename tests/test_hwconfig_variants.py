@@ -6,12 +6,7 @@ import sys
 import unittest
 
 
-TOOL_PATH = Path(__file__).parents[1] / "cc2_sig_tool.py"
-SPEC = importlib.util.spec_from_file_location("cc2_sig_tool_hwconfig", TOOL_PATH)
-assert SPEC is not None and SPEC.loader is not None
-tool = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = tool
-SPEC.loader.exec_module(tool)
+from cc2flash import image as tool
 
 
 def hwconfig_record(length: int, extension: bytes = b"") -> bytes:
@@ -58,3 +53,4 @@ class HwconfigVariantTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

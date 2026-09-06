@@ -31,8 +31,10 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
+from .display import invocation
+from .bundle import staged_directory
 
-TOOL_VERSION = "1.2.1"
+from . import __version__ as TOOL_VERSION
 MIN_IDENTICAL_READS = 3
 MAX_USB_READ_ATTEMPTS = 5
 
@@ -1173,11 +1175,11 @@ def build_preserved_config(files: Iterable[ConfigFile]) -> bytes:
     }
     if actual != expected:
         raise ValidationError(
-            "Internal preserve-data JFFS2 round-trip validation failed"
+            "Internal preserve-files JFFS2 round-trip validation failed"
         )
     if parsed["obsolete_node_count"] != 0:
         raise ValidationError(
-            "Internal preserve-data rebuild unexpectedly contains obsolete nodes"
+            "Internal preserve-files rebuild unexpectedly contains obsolete nodes"
         )
     return built
 
@@ -1527,26 +1529,17 @@ def build_recovery(
     output_dir: Path,
     *,
     confirmation_paths: Iterable[Path],
-    keep_config: bool,
     config_mode: str,
     wipe_unknown_config: bool,
-    overwrite: bool,
     show_serial: bool,
     allow_fewer_reads: bool,
 ) -> dict[str, Any]:
     confirmation_paths = tuple(confirmation_paths)
-    if config_mode not in {"clean-data", "preserve-data"}:
+    if config_mode not in {"serial-only", "preserve-files"}:
         raise ValidationError(f"Unknown config mode: {config_mode}")
-    if wipe_unknown_config and config_mode != "clean-data":
+    if wipe_unknown_config and config_mode != "serial-only":
         raise ValidationError(
-            "--wipe-unknown-config is valid only with --config-mode clean-data"
-        )
-    if keep_config and (
-        config_mode != "clean-data" or wipe_unknown_config
-    ):
-        raise ValidationError(
-            "--keep-config cannot be combined with preserve-data or "
-            "--wipe-unknown-config"
+            "--wipe-unknown-config is valid only with --config-mode serial-only"
         )
     image, input_source = read_image_source(input_path)
     confirmed_reads = verify_confirmation_reads(image, confirmation_paths)
@@ -1557,9 +1550,9 @@ def build_recovery(
         image,
         source_name,
         allow_unknown_config=(
-            wipe_unknown_config or config_mode == "preserve-data"
+            wipe_unknown_config or config_mode == "preserve-files"
         ),
-        preserve_config_data=config_mode == "preserve-data",
+        preserve_config_data=config_mode == "preserve-files",
     )
 
     total_reads = max(
@@ -1574,15 +1567,8 @@ def build_recovery(
         raise ValidationError(
             f"This dump is not an exact known reference and only {total_reads} "
             f"identical read(s) were supplied. Provide {MIN_IDENTICAL_READS} "
-            "total physical reads with --confirm, or explicitly accept the "
+            "total physical reads with --confirm-read, or explicitly accept the "
             "higher risk with --allow-fewer-reads."
-        )
-
-    if keep_config and not analysis["config_is_canonical"]:
-        raise ValidationError(
-            "--keep-config is allowed only for the exact canonical rebuilt "
-            "config. Preserving a noncanonical or exhausted JFFS2 partition "
-            "could leave the camera bricked."
         )
 
     output_resolved = output_dir.resolve()
@@ -1596,458 +1582,331 @@ def build_recovery(
                 f"Refusing an output directory that contains input dump {protected}"
             )
 
-    if output_dir.exists():
-        if output_dir.is_symlink():
-            raise ValidationError(f"Refusing symlink output directory: {output_dir}")
-        if not overwrite:
+    destination = output_dir
+    with staged_directory(destination) as output_dir:
+        recovery = bytearray(image)
+
+        patched_region, patch_changed = apply_system_patch(
+            image, analysis["system_state"]
+        )
+        recovery[PATCH_START:PATCH_END] = patched_region
+
+        canonical_config = build_minimal_config(analysis["serial_payload"])
+        if config_mode == "preserve-files":
+            live_config_files = analysis["live_config_files"]
+            assert live_config_files is not None
+            rebuilt_config = build_preserved_config(live_config_files)
+            config_changed = image[CONFIG_START:CONFIG_END] != rebuilt_config
+            recovery[CONFIG_START:CONFIG_END] = rebuilt_config
+        else:
+            rebuilt_config = canonical_config
+            config_changed = image[CONFIG_START:CONFIG_END] != rebuilt_config
+            recovery[CONFIG_START:CONFIG_END] = rebuilt_config
+
+        recovery_bytes = bytes(recovery)
+
+        # Prove that no bytes outside the two allowed regions changed.
+        if (
+            recovery_bytes[:PATCH_START] != image[:PATCH_START]
+            or recovery_bytes[PATCH_END:CONFIG_START]
+            != image[PATCH_END:CONFIG_START]
+            or recovery_bytes[CONFIG_END:] != image[CONFIG_END:]
+        ):
+            raise ValidationError("Internal safety check: bytes changed outside allowed regions")
+
+        # Re-run the complete strict validator on the generated image.
+        output_analysis = analyze_image(
+            recovery_bytes,
+            source_name="generated recovery image",
+            allow_unknown_config=config_mode == "preserve-files",
+            preserve_config_data=config_mode == "preserve-files",
+        )
+        if output_analysis["system_state"] != "known-bashrc-patched":
+            raise ValidationError("Generated image is not in the known patched system state")
+        if (
+            config_mode == "serial-only"
+            and not output_analysis["config_is_canonical"]
+        ):
+            raise ValidationError("Generated config is not canonical")
+        if recovery_bytes[CONFIG_START:CONFIG_END] != rebuilt_config:
             raise ValidationError(
-                f"Output directory already exists: {output_dir}. "
-                "Use --overwrite only after checking its contents."
+                "Generated config differs from the selected rebuilt partition"
             )
-        if output_dir.is_file():
-            raise ValidationError(f"Output path is a file: {output_dir}")
-        for child in output_dir.iterdir():
-            if child.name not in OUTPUT_FILE_NAMES or child.is_dir():
-                raise ValidationError(
-                    "Refusing to overwrite a directory containing an unknown "
-                    f"entry: {child}"
-                )
-        for child in output_dir.iterdir():
-            child.unlink()
-    else:
-        output_dir.mkdir(parents=True)
 
-    recovery = bytearray(image)
-
-    patched_region, patch_changed = apply_system_patch(
-        image, analysis["system_state"]
-    )
-    recovery[PATCH_START:PATCH_END] = patched_region
-
-    canonical_config = build_minimal_config(analysis["serial_payload"])
-    if keep_config:
-        rebuilt_config = image[CONFIG_START:CONFIG_END]
-        config_changed = False
-    elif config_mode == "preserve-data":
-        live_config_files = analysis["live_config_files"]
-        assert live_config_files is not None
-        rebuilt_config = build_preserved_config(live_config_files)
-        config_changed = image[CONFIG_START:CONFIG_END] != rebuilt_config
-        recovery[CONFIG_START:CONFIG_END] = rebuilt_config
-    else:
-        rebuilt_config = canonical_config
-        config_changed = image[CONFIG_START:CONFIG_END] != rebuilt_config
-        recovery[CONFIG_START:CONFIG_END] = rebuilt_config
-
-    recovery_bytes = bytes(recovery)
-
-    # Prove that no bytes outside the two allowed regions changed.
-    if (
-        recovery_bytes[:PATCH_START] != image[:PATCH_START]
-        or recovery_bytes[PATCH_END:CONFIG_START]
-        != image[PATCH_END:CONFIG_START]
-        or recovery_bytes[CONFIG_END:] != image[CONFIG_END:]
-    ):
-        raise ValidationError("Internal safety check: bytes changed outside allowed regions")
-
-    # Re-run the complete strict validator on the generated image.
-    output_analysis = analyze_image(
-        recovery_bytes,
-        source_name="generated recovery image",
-        allow_unknown_config=config_mode == "preserve-data",
-        preserve_config_data=config_mode == "preserve-data",
-    )
-    if output_analysis["system_state"] != "known-bashrc-patched":
-        raise ValidationError("Generated image is not in the known patched system state")
-    if (
-        not keep_config
-        and config_mode == "clean-data"
-        and not output_analysis["config_is_canonical"]
-    ):
-        raise ValidationError("Generated config is not canonical")
-    if recovery_bytes[CONFIG_START:CONFIG_END] != rebuilt_config:
-        raise ValidationError(
-            "Generated config differs from the selected rebuilt partition"
-        )
-
-    changed_regions: list[dict[str, Any]] = []
-    if patch_changed:
-        changed_regions.append(
-            {
-                "name": "system_bashrc_patch",
-                "start": PATCH_START,
-                "end_inclusive": PATCH_END - 1,
-                "size": PATCH_SIZE,
-            }
-        )
-    if config_changed:
-        changed_regions.append(
-            {
-                "name": "config",
-                "start": CONFIG_START,
-                "end_inclusive": CONFIG_END - 1,
-                "size": CONFIG_SIZE,
-            }
-        )
-
-    output_name = "cc2-camera-recovery.bin"
-    layout_name = "cc2-camera-layout.txt"
-    output_path = output_dir / output_name
-    output_path.write_bytes(recovery_bytes)
-    (output_dir / "config-restored.bin").write_bytes(rebuilt_config)
-    (output_dir / "serial.cfg").write_bytes(analysis["serial_payload"])
-
-    layout = """\
-00000000:00462fff immutable_before_patch
-00463000:0046afff system_bashrc_patch
-0046b000:007dffff immutable_after_patch
-007e0000:007fffff config
-"""
-    write_text(output_dir / layout_name, layout)
-
-    tool_filename = Path(__file__).name
-    preserved_files_manifest: list[dict[str, Any]] = []
-    if config_mode == "preserve-data":
-        live_config_files = analysis["live_config_files"]
-        assert live_config_files is not None
-        preserved_files_manifest = [
-            {
-                "name_hex": item.name.hex(),
-                "name_display": item.name.decode(
-                    "ascii", errors="backslashreplace"
-                ),
-                "size": len(item.data),
-                "sha256": sha256(item.data),
-                "inode": item.inode,
-                "mode": item.mode,
-                "uid": item.uid,
-                "gid": item.gid,
-                "atime": item.atime,
-                "mtime": item.mtime,
-                "ctime": item.ctime,
-                "flags": item.flags,
-                "dirent_mctime": item.dirent_mctime,
-                "dirent_type": item.dtype,
-            }
-            for item in live_config_files
-        ]
-    manifest = {
-        "tool": {
-            "name": tool_filename,
-            "version": TOOL_VERSION,
-        },
-        "input": {
-            "filename": input_path.name,
-            "source_format": input_source["format"],
-            "image_member": input_source["image_member"],
-            "size": len(image),
-            "sha256": sha256(image),
-            "acquisition_evidence": {
-                key: value
-                for key, value in input_source.items()
-                if key
-                not in {
-                    "format",
-                    "image_member",
-                    "size",
-                    "sha256",
-                    "md5",
-                    "evidenced_identical_reads",
+        changed_regions: list[dict[str, Any]] = []
+        if patch_changed:
+            changed_regions.append(
+                {
+                    "name": "system_bashrc_patch",
+                    "start": PATCH_START,
+                    "end_inclusive": PATCH_END - 1,
+                    "size": PATCH_SIZE,
                 }
+            )
+        if config_changed:
+            changed_regions.append(
+                {
+                    "name": "config",
+                    "start": CONFIG_START,
+                    "end_inclusive": CONFIG_END - 1,
+                    "size": CONFIG_SIZE,
+                }
+            )
+
+        output_name = "cc2-camera-recovery.bin"
+        layout_name = "cc2-camera-layout.txt"
+        output_path = output_dir / output_name
+        output_path.write_bytes(recovery_bytes)
+        (output_dir / "config-restored.bin").write_bytes(rebuilt_config)
+        (output_dir / "serial.cfg").write_bytes(analysis["serial_payload"])
+
+        layout = """\
+    00000000:00462fff immutable_before_patch
+    00463000:0046afff system_bashrc_patch
+    0046b000:007dffff immutable_after_patch
+    007e0000:007fffff config
+    """
+        write_text(output_dir / layout_name, layout)
+
+        tool_filename = "cc2flash"
+        preserved_files_manifest: list[dict[str, Any]] = []
+        if config_mode == "preserve-files":
+            live_config_files = analysis["live_config_files"]
+            assert live_config_files is not None
+            preserved_files_manifest = [
+                {
+                    "name_hex": item.name.hex(),
+                    "name_display": item.name.decode(
+                        "ascii", errors="backslashreplace"
+                    ),
+                    "size": len(item.data),
+                    "sha256": sha256(item.data),
+                    "inode": item.inode,
+                    "mode": item.mode,
+                    "uid": item.uid,
+                    "gid": item.gid,
+                    "atime": item.atime,
+                    "mtime": item.mtime,
+                    "ctime": item.ctime,
+                    "flags": item.flags,
+                    "dirent_mctime": item.dirent_mctime,
+                    "dirent_type": item.dtype,
+                }
+                for item in live_config_files
+            ]
+        manifest = {
+            "tool": {
+                "name": tool_filename,
+                "version": TOOL_VERSION,
             },
-            "confirmed_reads": confirmed_reads,
-            "total_identical_reads": total_reads,
-            "fewer_reads_explicitly_allowed": (
-                insufficient_reads and allow_fewer_reads
-            ),
-        },
-        "validation": {
-            "invariant_sha256": analysis["invariant_sha256"],
-            "invariant_match": True,
-            "hwconfig_variant": analysis["hwconfig_variant"],
-            "exact_full_reference": analysis["exact_reference"],
-            "system_state_before": analysis["system_state"],
-            "system_state_after": output_analysis["system_state"],
-            "serial_source": analysis["serial_source"],
-            "serial_masked": mask_value(analysis["serial_value"]),
-            "serial_sha256": analysis["serial_sha256"],
-            "uoid_masked": mask_value(analysis["uoid"]),
-            "serial_uoid_prefix_match": True,
-            "config_usage_percent_before": round(
-                analysis["config_usage_percent"], 6
-            ),
-            "config_obsolete_nodes_before": analysis[
-                "config_obsolete_node_count"
-            ],
-            "config_unexpected_names_before": analysis[
-                "config_unexpected_names"
-            ],
-        },
-        "output": {
-            "filename": output_name,
-            "size": len(recovery_bytes),
-            "sha256": sha256(recovery_bytes),
-            "canonical_config_sha256": sha256(canonical_config),
-            "rebuilt_config_sha256": sha256(rebuilt_config),
-            "preserved_files": preserved_files_manifest,
-        },
-        "changed_regions": changed_regions,
-        "keep_config": keep_config,
-        "config_mode": "keep-config" if keep_config else config_mode,
-        "wipe_unknown_config": wipe_unknown_config,
-        "reference_full_sha256": REFERENCE_FULL_SHA256,
-    }
-    write_text(
-        output_dir / "MANIFEST.json",
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-    )
+            "input": {
+                "filename": input_path.name,
+                "source_format": input_source["format"],
+                "image_member": input_source["image_member"],
+                "size": len(image),
+                "sha256": sha256(image),
+                "acquisition_evidence": {
+                    key: value
+                    for key, value in input_source.items()
+                    if key
+                    not in {
+                        "format",
+                        "image_member",
+                        "size",
+                        "sha256",
+                        "md5",
+                        "evidenced_identical_reads",
+                    }
+                },
+                "confirmed_reads": confirmed_reads,
+                "total_identical_reads": total_reads,
+                "fewer_reads_explicitly_allowed": (
+                    insufficient_reads and allow_fewer_reads
+                ),
+            },
+            "validation": {
+                "invariant_sha256": analysis["invariant_sha256"],
+                "invariant_match": True,
+                "hwconfig_variant": analysis["hwconfig_variant"],
+                "exact_full_reference": analysis["exact_reference"],
+                "system_state_before": analysis["system_state"],
+                "system_state_after": output_analysis["system_state"],
+                "serial_source": analysis["serial_source"],
+                "serial_masked": mask_value(analysis["serial_value"]),
+                "serial_sha256": analysis["serial_sha256"],
+                "uoid_masked": mask_value(analysis["uoid"]),
+                "serial_uoid_prefix_match": True,
+                "config_usage_percent_before": round(
+                    analysis["config_usage_percent"], 6
+                ),
+                "config_obsolete_nodes_before": analysis[
+                    "config_obsolete_node_count"
+                ],
+                "config_unexpected_names_before": analysis[
+                    "config_unexpected_names"
+                ],
+            },
+            "output": {
+                "filename": output_name,
+                "size": len(recovery_bytes),
+                "sha256": sha256(recovery_bytes),
+                "canonical_config_sha256": sha256(canonical_config),
+                "rebuilt_config_sha256": sha256(rebuilt_config),
+                "preserved_files": preserved_files_manifest,
+            },
+            "changed_regions": changed_regions,
+            "config_mode": config_mode,
+            "wipe_unknown_config": wipe_unknown_config,
+            "reference_full_sha256": REFERENCE_FULL_SHA256,
+        }
+        write_text(
+            output_dir / "MANIFEST.json",
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        )
 
-    source_report = format_analysis(analysis, show_serial=show_serial)
-    source_report += (
-        f"\nPhysical-read confirmation\n--------------------------\n"
-        f"Byte-identical reads supplied: {total_reads}\n"
-    )
-    for item in confirmed_reads:
-        source_report += f"- {item['filename']}  {item['sha256']}\n"
-    if insufficient_reads:
+        source_report = format_analysis(analysis, show_serial=show_serial)
         source_report += (
-            "WARNING: fewer than three reads were supplied for a non-reference "
-            "image; the higher risk was explicitly accepted.\n"
+            f"\nPhysical-read confirmation\n--------------------------\n"
+            f"Byte-identical reads supplied: {total_reads}\n"
         )
-    output_report = format_analysis(output_analysis, show_serial=show_serial)
-    validation_text = (
-        source_report
-        + "\nGenerated image\n===============\n\n"
-        + f"Output SHA-256:         {sha256(recovery_bytes)}\n"
-        + f"System patch changed:   {'yes' if patch_changed else 'no'}\n"
-        + f"Config changed:         {'yes' if config_changed else 'no'}\n"
-        + f"Config mode:            "
-        + ("keep-config" if keep_config else config_mode)
-        + "\n"
-        + f"Unknown-name wipe:      "
-        + ("yes" if wipe_unknown_config else "no")
-        + "\n"
-        + f"keep_config requested:  {'yes' if keep_config else 'no'}\n"
-        + f"Changed regions:        "
-        + (
-            ", ".join(region["name"] for region in changed_regions)
-            if changed_regions
-            else "(none; input already equals generated image)"
+        for item in confirmed_reads:
+            source_report += f"- {item['filename']}  {item['sha256']}\n"
+        if insufficient_reads:
+            source_report += (
+                "WARNING: fewer than three reads were supplied for a non-reference "
+                "image; the higher risk was explicitly accepted.\n"
+            )
+        output_report = format_analysis(output_analysis, show_serial=show_serial)
+        validation_text = (
+            source_report
+            + "\nGenerated image\n===============\n\n"
+            + f"Output SHA-256:         {sha256(recovery_bytes)}\n"
+            + f"System patch changed:   {'yes' if patch_changed else 'no'}\n"
+            + f"Config changed:         {'yes' if config_changed else 'no'}\n"
+            + f"Config mode:            "
+            + config_mode
+            + "\n"
+            + f"Unknown-name wipe:      "
+            + ("yes" if wipe_unknown_config else "no")
+            + "\n"
+            + f"Changed regions:        "
+            + (
+                ", ".join(region["name"] for region in changed_regions)
+                if changed_regions
+                else "(none; input already equals generated image)"
+            )
+            + "\n\nPost-build validation\n---------------------\n"
+            + output_report
         )
-        + "\n\nPost-build validation\n---------------------\n"
-        + output_report
-    )
-    write_text(output_dir / "VALIDATION.txt", validation_text)
+        write_text(output_dir / "VALIDATION.txt", validation_text)
 
-    selected = " ".join(
-        f"-i {region['name']}" for region in changed_regions
-    )
-    if changed_regions:
-        write_command = (
-            "flashrom "
-            "-p buspirate_spi:dev=COM11,spispeed=1M "
-            f"-l {layout_name} {selected} -w {output_name}"
+        selected = " ".join(
+            f"-i {region['name']}" for region in changed_regions
         )
-        write_section = f"""\
-WRITE COMMAND TEMPLATE
-----------------------
-Edit COM11 and speed settings for your programmer, then run from this folder:
+        if changed_regions:
+            write_command = (
+                "flashrom "
+                "-p buspirate_spi:dev=COM11,spispeed=1M "
+                f"-l {layout_name} {selected} -w {output_name}"
+            )
+            write_section = f"""\
+    WRITE COMMAND TEMPLATE
+    ----------------------
+    Edit COM11 and speed settings for your programmer, then run from this folder:
 
-{write_command}
+    {write_command}
 
-The command intentionally omits --progress because some flashrom versions
-spam progress-accounting warnings. Flashrom still performs verification.
+    The command intentionally omits --progress because some flashrom versions
+    spam progress-accounting warnings. Flashrom still performs verification.
 
-The command intentionally does not enable programmer-supplied power. Verify
-the flash chip's required voltage and your wiring first, then power it using
-the hardware method you have independently tested while reading.
-"""
-    else:
-        write_section = """\
-WRITE COMMAND
--------------
-No write is necessary: the input already equals the generated recovery image.
-"""
-
-    read_warning = ""
-    if insufficient_reads:
-        read_warning = """\
-READ-CONFIDENCE WARNING
------------------------
-This non-reference image was built from fewer than three byte-identical
-physical reads. Re-read the flash and rebuild before writing if at all possible.
-
-"""
-
-    flashing = f"""\
-CC2 CAMERA RECOVERY — GENERATED INSTRUCTIONS
-============================================
-
-Input SHA-256:
-{sha256(image)}
-
-Recovery SHA-256:
-{sha256(recovery_bytes)}
-
-{read_warning}
-{write_section}
-FULL READBACK
--------------
-Keep the same stable programmer connection and make a complete 8 MiB read:
-
-flashrom -p buspirate_spi:dev=COM11,spispeed=1M -r cc2-camera-readback.bin
-
-Then verify it with this tool:
-
-py {tool_filename} verify {output_name} cc2-camera-readback.bin
-
-Never connect normal USB/device power and programmer-supplied target power at
-the same time. Confirm the SPI voltage from the exact flash part marking or
-datasheet before making any powered connection.
-
-PRIVACY
--------
-serial.cfg and the generated recovery image contain this camera's unique
-identifier. Do not publish either file unredacted.
-"""
-    write_text(output_dir / "FLASHING.txt", flashing)
-
-    hashes = []
-    for name in [
-        output_name,
-        "config-restored.bin",
-        "serial.cfg",
-        layout_name,
-        "MANIFEST.json",
-        "VALIDATION.txt",
-        "FLASHING.txt",
-    ]:
-        content = (output_dir / name).read_bytes()
-        hashes.append(f"{sha256(content)}  {name}")
-    write_text(output_dir / "SHA256SUMS.txt", "\n".join(hashes) + "\n")
-
-    return {
-        "analysis": analysis,
-        "output_analysis": output_analysis,
-        "manifest": manifest,
-        "confirmed_reads": confirmed_reads,
-        "output_dir": output_dir,
-        "output_path": output_path,
-    }
-
-
-def verify_readback(expected_path: Path, readback_path: Path) -> None:
-    expected = expected_path.read_bytes()
-    actual = readback_path.read_bytes()
-
-    expected_analysis = analyze_image(
-        expected,
-        str(expected_path),
-        allow_unknown_config=True,
-        preserve_config_data=True,
-    )
-    if expected_analysis["system_state"] != "known-bashrc-patched":
-        raise ValidationError("Expected image is not in the audited patched state")
-
-    if len(expected) != len(actual):
-        raise ValidationError(
-            f"Size mismatch: expected {len(expected)} bytes, "
-            f"readback has {len(actual)} bytes"
-        )
-
-    if expected == actual:
-        actual_analysis = analyze_image(
-            actual,
-            str(readback_path),
-            allow_unknown_config=True,
-            preserve_config_data=True,
-        )
-        if actual_analysis["system_state"] != "known-bashrc-patched":
-            raise ValidationError("Readback is identical but not a valid recovery image")
-        print("READBACK VERIFIED: byte-for-byte identical")
-        print(f"SHA-256: {sha256(actual)}")
-        return
-
-    summary = difference_summary(expected, actual)
-    affected_flags = {
-        "system_bashrc_patch": False,
-        "config": False,
-        "other": False,
-    }
-    for index, (left, right) in enumerate(zip(expected, actual)):
-        if left == right:
-            continue
-        if PATCH_START <= index < PATCH_END:
-            affected_flags["system_bashrc_patch"] = True
-        elif CONFIG_START <= index < CONFIG_END:
-            affected_flags["config"] = True
+    The command intentionally does not enable programmer-supplied power. Verify
+    the flash chip's required voltage and your wiring first, then power it using
+    the hardware method you have independently tested while reading.
+    """
         else:
-            affected_flags["other"] = True
-    affected = [name for name, value in affected_flags.items() if value]
+            write_section = """\
+    WRITE COMMAND
+    -------------
+    No write is necessary: the input already equals the generated recovery image.
+    """
 
-    raise ValidationError(
-        "Readback differs from the expected image: "
-        f"{summary['different_bytes']} bytes; first=0x"
-        f"{summary['first_difference']:06X}, last=0x"
-        f"{summary['last_difference']:06X}; affected={', '.join(affected)}"
-    )
+        read_warning = ""
+        if insufficient_reads:
+            read_warning = """\
+    READ-CONFIDENCE WARNING
+    -----------------------
+    This non-reference image was built from fewer than three byte-identical
+    physical reads. Re-read the flash and rebuild before writing if at all possible.
 
+    """
 
-def self_test(image_path: Path | None = None) -> None:
-    padding = len(ORIGINAL_COPY_BLOCK) - len(PATCHED_COPY_BLOCK_VISIBLE)
-    if padding < 0:
-        raise ValidationError("Readable bashrc patch block is too large")
-    replacement = PATCHED_COPY_BLOCK_VISIBLE[:-1] + b" " * padding + b"\n"
-    if len(replacement) != len(ORIGINAL_COPY_BLOCK):
-        raise ValidationError("Readable bashrc patch does not preserve length")
+        flashing = f"""\
+    CC2 CAMERA RECOVERY — GENERATED INSTRUCTIONS
+    ============================================
 
-    xz_vector = (b"CC2 auditable SquashFS patch self-test\n" * 257) + b"end"
-    xz_stream = build_squashfs_xz_fragment(xz_vector)
-    if lzma.decompress(xz_stream) != xz_vector:
-        raise ValidationError("Deterministic XZ builder self-test failed")
+    Input SHA-256:
+    {sha256(image)}
 
-    dummy = b"serial=12PSSSS4TEST000000000000000000000000\n"
-    # Dummy must retain the exact 36-character serial value format.
-    if not serial_payload_is_valid(dummy):
-        raise ValidationError("Internal serial regex self-test vector is invalid")
-    config = build_minimal_config(dummy)
-    parsed = extract_serial_and_config_info(config)
-    if parsed["serial_payload"] != dummy:
-        raise ValidationError("JFFS2 self-test failed")
+    Recovery SHA-256:
+    {sha256(recovery_bytes)}
 
-    image_result = "not requested"
-    if image_path is not None:
-        image, source = read_image_source(image_path)
-        source_name = str(image_path)
-        if source["image_member"] is not None:
-            source_name += f"!{source['image_member']}"
-        analysis = analyze_image(image, source_name)
-        if analysis["system_state"] == "stock-unpatched":
-            patched = build_system_patch_window(image)
-            if sha256(patched) != PATCHED_PATCH_SHA256:
-                raise ValidationError("Full system patch self-test failed")
-            image_result = "stock image generated the exact audited patch window"
-        else:
-            image_result = "image already contains the exact audited patch window"
+    {read_warning}
+    {write_section}
+    FULL READBACK
+    -------------
+    Keep the same stable programmer connection and make a complete 8 MiB read:
 
-    print("SELF-TEST PASSED")
-    print(f"Tool version: {TOOL_VERSION}")
-    print(f"Readable bashrc replacement padding: {padding} bytes")
-    print(f"Deterministic XZ test SHA-256: {sha256(xz_stream)}")
-    print(f"Generated JFFS2 SHA-256: {sha256(config)}")
-    print(f"Image patch test: {image_result}")
+    flashrom -p buspirate_spi:dev=COM11,spispeed=1M -r cc2-camera-readback.bin
+
+    Then compare every byte:
+
+    fc.exe /b {output_name} cc2-camera-readback.bin\n\nOn Linux/macOS use: cmp {output_name} cc2-camera-readback.bin
+
+    Never connect normal USB/device power and programmer-supplied target power at
+    the same time. Confirm the SPI voltage from the exact flash part marking or
+    datasheet before making any powered connection.
+
+    PRIVACY
+    -------
+    serial.cfg and the generated recovery image contain this camera's unique
+    identifier. Do not publish either file unredacted.
+    """
+        write_text(output_dir / "FLASHING.txt", flashing)
+
+        hashes = []
+        for name in [
+            output_name,
+            "config-restored.bin",
+            "serial.cfg",
+            layout_name,
+            "MANIFEST.json",
+            "VALIDATION.txt",
+            "FLASHING.txt",
+        ]:
+            content = (output_dir / name).read_bytes()
+            hashes.append(f"{sha256(content)}  {name}")
+        write_text(output_dir / "SHA256SUMS.txt", "\n".join(hashes) + "\n")
+
+        return {
+            "analysis": analysis,
+            "output_analysis": output_analysis,
+            "manifest": manifest,
+            "confirmed_reads": confirmed_reads,
+            "output_dir": destination,
+            "output_path": destination / output_name,
+        }
 
 
 def cmd_analyze(args: argparse.Namespace) -> None:
     path = Path(args.image)
     image, source = read_image_source(path)
     confirmations = verify_confirmation_reads(
-        image, [Path(item) for item in args.confirm]
+        image, [Path(item) for item in args.confirm_read]
     )
     source_name = str(path)
     if source["image_member"] is not None:
         source_name += f"!{source['image_member']}"
-    print(format_analysis(analyze_image(image, source_name), show_serial=args.show_serial))
+    print(format_analysis(analyze_image(image, source_name), show_serial=args.show_identifiers))
     evidenced_reads = max(
         source["evidenced_identical_reads"],
         1 + len(confirmations),
@@ -2074,12 +1933,10 @@ def cmd_build(args: argparse.Namespace) -> None:
     result = build_recovery(
         input_path,
         output_dir,
-        confirmation_paths=[Path(item) for item in args.confirm],
-        keep_config=args.keep_config,
+        confirmation_paths=[Path(item) for item in args.confirm_read],
         config_mode=args.config_mode,
         wipe_unknown_config=args.wipe_unknown_config,
-        overwrite=args.overwrite,
-        show_serial=args.show_serial,
+        show_serial=args.show_identifiers,
         allow_fewer_reads=args.allow_fewer_reads,
     )
     manifest = result["manifest"]
@@ -2098,143 +1955,8 @@ def cmd_build(args: argparse.Namespace) -> None:
         )
     else:
         print("Regions to write: none")
-
-
-def cmd_verify(args: argparse.Namespace) -> None:
-    verify_readback(Path(args.expected), Path(args.readback))
-
-
-def cmd_self_test(args: argparse.Namespace) -> None:
-    self_test(Path(args.image) if args.image else None)
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Strict validator and recovery-image builder for the exact CC2 "
-            "camera firmware family observed in two independent dumps."
-        )
-    )
-    parser.add_argument(
-        "--version", action="version", version=f"%(prog)s {TOOL_VERSION}"
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    analyze = subparsers.add_parser(
-        "analyze", help="validate a dump without creating a recovery image"
-    )
-    analyze.add_argument(
-        "image", help="primary raw 8 MiB dump or cc2flash backup ZIP"
-    )
-    analyze.add_argument(
-        "--confirm",
-        nargs="*",
-        default=[],
-        metavar="DUMP",
-        help="additional physical reads that must be byte-identical",
-    )
-    analyze.add_argument(
-        "--show-serial",
-        action="store_true",
-        help="print the full unit identifiers instead of masking them",
-    )
-    analyze.set_defaults(func=cmd_analyze)
-
-    build = subparsers.add_parser(
-        "build", help="validate a dump and generate a recovery bundle"
-    )
-    build.add_argument(
-        "image", help="primary raw 8 MiB dump or cc2flash backup ZIP"
-    )
-    build.add_argument(
-        "--confirm",
-        nargs="*",
-        default=[],
-        metavar="DUMP",
-        help="additional physical reads that must be byte-identical",
-    )
-    build.add_argument(
-        "-o", "--output", help="output directory (default: beside the input)"
-    )
-    build.add_argument(
-        "--keep-config",
-        action="store_true",
-        help=(
-            "leave config untouched only if it is already the exact canonical "
-            "rebuild; exhausted/noncanonical config is refused"
-        ),
-    )
-    build.add_argument(
-        "--config-mode",
-        choices=("clean-data", "preserve-data"),
-        default="clean-data",
-        help=(
-            "clean-data keeps only serial.cfg and lets the next boot recreate "
-            "defaults; preserve-data recreates each live regular file once "
-            "(default: clean-data)"
-        ),
-    )
-    build.add_argument(
-        "--wipe-unknown-config",
-        action="store_true",
-        help=(
-            "with clean-data, explicitly discard CRC-valid config names "
-            "outside the audited set while still preserving serial.cfg"
-        ),
-    )
-    build.add_argument(
-        "--allow-fewer-reads",
-        action="store_true",
-        help=(
-            "explicitly accept fewer than three identical physical reads for "
-            "a dump that is not an exact known reference"
-        ),
-    )
-    build.add_argument(
-        "--overwrite",
-        action="store_true",
-        help="replace an existing output directory",
-    )
-    build.add_argument(
-        "--show-serial",
-        action="store_true",
-        help="include full identifiers in VALIDATION.txt",
-    )
-    build.set_defaults(func=cmd_build)
-
-    verify = subparsers.add_parser(
-        "verify", help="compare a full programmer readback with a generated image"
-    )
-    verify.add_argument("expected", help="generated recovery image")
-    verify.add_argument("readback", help="full 8 MiB readback")
-    verify.set_defaults(func=cmd_verify)
-
-    test = subparsers.add_parser(
-        "self-test", help="check the readable patch, XZ, and JFFS2 implementation"
-    )
-    test.add_argument(
-        "image",
-        nargs="?",
-        help=(
-            "optional supported raw image or cc2flash backup ZIP for a "
-            "complete system-patch self-test"
-        ),
-    )
-    test.set_defaults(func=cmd_self_test)
-
-    return parser
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    try:
-        args.func(args)
-    except (OSError, ValidationError) as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        return 2
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    if manifest["input"]["source_format"] == USB_BACKUP_FORMAT:
+        print("Next, restore the recovery image:")
+        print(invocation("restore", str(result["output_path"]), "--backup", str(input_path)))
+    else:
+        print("Next, program the generated full image with your external programmer and require full-chip verification.")

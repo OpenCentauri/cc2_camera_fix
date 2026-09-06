@@ -951,7 +951,8 @@ class CliAdbWorkflowTests(unittest.TestCase):
                 ),
                 redirect_stdout(output),
             ):
-                status = cli.command_plan(args)
+                with mock.patch.object(cli, "validate_preparation_image"):
+                    status = cli.command_plan(args)
         self.assertEqual(status, 0)
         compatible.assert_called_once_with(image, image)
         result = json.loads(output.getvalue())
@@ -966,10 +967,9 @@ class CliAdbWorkflowTests(unittest.TestCase):
             args = SimpleNamespace(
                 image=str(image_path),
                 backup="backup.zip",
-                yes=True,
-                enumeration_timeout=30,
+                dry_run=False,
+                bootloader_timeout=30,
                 reboot_timeout=180,
-                no_post_verify=True,
                 adb_timeout=60,
                 adb="adb",
                 serial=None,
@@ -1071,7 +1071,7 @@ class CliAdbWorkflowTests(unittest.TestCase):
             redirect_stderr(io.StringIO()),
         ):
             status = cli.main(["install-adb-startup"])
-        self.assertEqual(status, 3)
+        self.assertEqual(status, 0)
         install.assert_called_once_with()
 
     def test_install_confirmation_mismatch_does_not_write(self):
@@ -1115,20 +1115,22 @@ class CliAdbWorkflowTests(unittest.TestCase):
             redirect_stderr(io.StringIO()),
         ):
             status = cli.main(["install-adb-startup", "--yes"])
-        self.assertEqual(status, 3)
+        self.assertEqual(status, 0)
         install.assert_called_once_with()
         self.assertIn("restart", stdout.getvalue().casefold())
 
-    def test_install_when_adb_online_does_not_write(self):
+    def test_install_when_adb_online_installs_for_future_boots(self):
         fake_adb = mock.Mock()
+        fake_adb.identity_and_partitions.return_value = ("root", [])
         with (
             mock.patch.object(cli, "_adb", return_value=fake_adb),
             mock.patch.object(cli, "install_adb_startup") as install,
             redirect_stdout(io.StringIO()),
+            redirect_stderr(io.StringIO()),
         ):
             status = cli.main(["install-adb-startup", "--yes"])
         self.assertEqual(status, 0)
-        install.assert_not_called()
+        install.assert_called_once_with()
 
     def test_known_bootloader_is_accepted_after_stable_acquisition(self):
         image = b"image"
@@ -1163,7 +1165,7 @@ class CliAdbWorkflowTests(unittest.TestCase):
         save.assert_not_called()
         error = stderr.getvalue()
         self.assertIn(observed, error)
-        self.assertIn(f"--accept-bootloader-hash {observed}", error)
+        self.assertIn(f"--accept-bootloader-sha256 {observed}", error)
 
     def test_exact_unknown_bootloader_hash_can_be_accepted(self):
         image = b"image"
@@ -1177,7 +1179,7 @@ class CliAdbWorkflowTests(unittest.TestCase):
             redirect_stdout(io.StringIO()),
         ):
             status = cli.main(
-                ["backup", "backup.zip", "--accept-bootloader-hash", observed]
+                ["backup", "backup.zip", "--accept-bootloader-sha256", observed]
             )
         self.assertEqual(status, 0)
         self.assertEqual(manifest["bootloader"]["acceptance"], "explicit-hash")
@@ -1196,7 +1198,7 @@ class CliAdbWorkflowTests(unittest.TestCase):
             redirect_stderr(stderr),
         ):
             status = cli.main(
-                ["backup", "backup.zip", "--accept-bootloader-hash", supplied]
+                ["backup", "backup.zip", "--accept-bootloader-sha256", supplied]
             )
         self.assertEqual(status, 2)
         save.assert_not_called()
@@ -1212,10 +1214,9 @@ class CliAdbWorkflowTests(unittest.TestCase):
             args = SimpleNamespace(
                 image=str(image_path),
                 backup="backup.zip",
-                yes=True,
-                enumeration_timeout=30,
+                dry_run=False,
+                bootloader_timeout=30,
                 reboot_timeout=180,
-                no_post_verify=False,
                 adb_timeout=7,
                 adb="adb",
                 serial=None,
@@ -1233,6 +1234,7 @@ class CliAdbWorkflowTests(unittest.TestCase):
                 ),
                 mock.patch.object(cli, "validate_preparation_image"),
                 mock.patch.object(cli, "prepare_restore"),
+                mock.patch.object(cli, "_confirm"),
                 mock.patch.object(cli, "enter_bootloader"),
                 mock.patch.object(cli, "wait_for_hid"),
                 mock.patch.object(cli, "restore_blob"),
@@ -1265,10 +1267,9 @@ class CliAdbWorkflowTests(unittest.TestCase):
             args = SimpleNamespace(
                 image=str(image_path),
                 backup="backup.zip",
-                yes=True,
-                enumeration_timeout=30,
+                dry_run=False,
+                bootloader_timeout=30,
                 reboot_timeout=180,
-                no_post_verify=False,
                 adb_timeout=7,
                 adb="adb",
                 serial=None,
@@ -1286,6 +1287,7 @@ class CliAdbWorkflowTests(unittest.TestCase):
                 ),
                 mock.patch.object(cli, "validate_preparation_image"),
                 mock.patch.object(cli, "prepare_restore"),
+                mock.patch.object(cli, "_confirm"),
                 mock.patch.object(cli, "enter_bootloader"),
                 mock.patch.object(cli, "wait_for_hid"),
                 mock.patch.object(cli, "restore_blob"),
@@ -1327,10 +1329,9 @@ class CliAdbWorkflowTests(unittest.TestCase):
             args = SimpleNamespace(
                 image=str(image_path),
                 backup="backup.zip",
-                yes=True,
-                enumeration_timeout=30,
+                dry_run=False,
+                bootloader_timeout=30,
                 reboot_timeout=180,
-                no_post_verify=False,
                 adb_timeout=7,
                 adb="adb",
                 serial=None,
@@ -1350,6 +1351,7 @@ class CliAdbWorkflowTests(unittest.TestCase):
                 ),
                 mock.patch.object(cli, "validate_preparation_image"),
                 mock.patch.object(cli, "prepare_restore"),
+                mock.patch.object(cli, "_confirm"),
                 mock.patch.object(cli, "enter_bootloader"),
                 mock.patch.object(cli, "wait_for_hid"),
                 mock.patch.object(cli, "restore_blob"),
@@ -1380,10 +1382,9 @@ class CliAdbWorkflowTests(unittest.TestCase):
             args = SimpleNamespace(
                 image=str(image_path),
                 backup="backup.zip",
-                yes=True,
-                enumeration_timeout=30,
+                dry_run=False,
+                bootloader_timeout=30,
                 reboot_timeout=180,
-                no_post_verify=False,
                 adb_timeout=7,
                 adb="adb",
                 serial=None,
@@ -1403,6 +1404,7 @@ class CliAdbWorkflowTests(unittest.TestCase):
                 ),
                 mock.patch.object(cli, "validate_preparation_image"),
                 mock.patch.object(cli, "prepare_restore"),
+                mock.patch.object(cli, "_confirm"),
                 mock.patch.object(cli, "enter_bootloader"),
                 mock.patch.object(cli, "wait_for_hid"),
                 mock.patch.object(cli, "restore_blob"),

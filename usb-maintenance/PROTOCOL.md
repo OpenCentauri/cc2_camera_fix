@@ -740,7 +740,7 @@ full 256 KiB `boot` partition. The built-in known reference is:
 
 If the stable image has a different boot SHA-256, the command publishes no
 backup and prints that exact observed value. The user may independently review
-it and rerun with `--accept-bootloader-hash <observed-sha256>`. A supplied hash
+it and rerun with `--accept-bootloader-sha256 <observed-sha256>`. A supplied hash
 that differs from the newly observed partition is rejected. The accepted v2
 manifest records whether the basis was `known-reference` or `explicit-hash`.
 The raw image and manifest are published as exactly two members of one ordinary
