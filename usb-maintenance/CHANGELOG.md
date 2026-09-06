@@ -1,18 +1,21 @@
 # Changelog
 
-## Unreleased — physical restore findings
+## Unreleased — physically validated USB restore
 
-- Documented the first destructive physical test of the USB restore path.
-- Confirmed one complete 2,742-packet U-Boot HID transfer, full 8 MiB
-  erase/write, normal reboot, live video, and independent three-read ADB
-  verification.
-- Documented the blocking normal-mode trigger failure: the stock SFC erase path
+- Documented the initial destructive trigger failure: the stock SFC erase path
   does not handle its configured 16 KiB size, so page-programming over an
   occupied JFFS2 cleanmarker produced the NOR bitwise-AND result instead of the
   upgrade words.
-- Marked the current one-command `cc2flash restore` path as unsuitable for end
-  users until a safe, uninterrupted entry procedure is selected, implemented,
-  and physically validated.
+- Added fail-closed restore preparation that dynamically derives and validates
+  the live SFC object, temporarily selects the supported 4 KiB erase size, and
+  verifies readback before sending the stock HID flag request.
+- Physically validated the integrated one-command `cc2flash restore` path on
+  the supported camera and exact gated kernel: three stable pre-write reads,
+  automatic RAM preparation, stock bootloader entry, all 2,742 packets, full
+  8 MiB erase/write, normal reboot, and three stable post-write reads matching
+  every boot-stable byte through HWCONFIG.
+- Confirmed that the preparation requires no manual config erase, process
+  suspension, replacement updater, or bootloader modification.
 
 ## v0.8.0 — hardware/USB recovery interoperability
 
