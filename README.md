@@ -129,13 +129,13 @@ and `adb`, the supported sequence is:
 cc2flash start-adb
 cc2flash backup backup.zip
 cc2flash build-image backup.zip
-cc2flash restore --dry-run backup-cc2-recovery/cc2-camera-recovery.bin --backup backup.zip
 cc2flash restore backup-cc2-recovery/cc2-camera-recovery.bin --backup backup.zip
 ```
 
 Use the command prefix from your [platform's installation instructions](docs/INSTALLATION.md).
 If ADB is not on PATH, add `--adb "path/to/adb"` to connected-camera commands,
-but not to offline `build-image` or `restore --dry-run`.
+but not to offline `build-image`. `restore --dry-run` accepts these options
+without using them.
 
 `start-adb` temporarily starts the camera's existing root ADB service.
 `backup` then reads the complete flash repeatedly and publishes `backup.zip`
@@ -143,7 +143,7 @@ only after obtaining three consecutive identical images. Keep that ZIP
 unchanged and in a separate safe location.
 
 The builder validates the backup and creates the camera-specific preventive
-image. `restore --dry-run` performs the same-camera and allowed-change checks
+image. The optional `restore --dry-run` performs the same-camera and allowed-change checks
 without opening USB. `restore` repeats those checks, validates the live camera
 against the preserved backup, temporarily prepares the known stock SFC driver,
 and requires the literal confirmation `RESTORE-CC2` before its first write.
@@ -156,7 +156,7 @@ generated image. Do not work around a validation failure.
 ## Failed camera: hardware recovery
 
 This route reads and rewrites the camera's eight-pin SPI flash with an external
-programmer. The recommended beginner setup uses the NeoProgrammer graphical
+programmer. The recommended setup uses the NeoProgrammer graphical
 application for every flash operation; only the recovery-image build requires
 a command line.
 
@@ -276,7 +276,6 @@ No full camera dump or vendor firmware image is included in this repository.
 
 - [Installation and release downloads](docs/INSTALLATION.md)
 - [Complete cc2flash command reference](docs/CLI.md)
-- [Hardware-recovery CLI reference](hardware-recovery/CLI_REFERENCE.md)
 - [Programmer and alternative-hardware reference](hardware-recovery/PROGRAMMER_REFERENCE.md)
 - [Independent recovery-tool verification](hardware-recovery/CC2_RECOVERY_VERIFICATION.md)
 - [Hardware-recovery regression results](hardware-recovery/TEST_RESULTS.md)

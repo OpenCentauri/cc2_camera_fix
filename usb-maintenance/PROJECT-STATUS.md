@@ -53,8 +53,8 @@
 - Made post-write verification compatible with both hardware-recovery config
   modes: after a serial-only boot it separately prompts for permission to start
   ADB temporarily, requires an exact match through HWCONFIG, and separately
-  reports config changes made by that boot. It never treats restore `--yes` as
-  consent to start ADB.
+  reports config changes made by that boot. Starting temporary ADB requires
+  separate consent.
 
 ## Client status
 

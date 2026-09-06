@@ -50,7 +50,7 @@ updater. Read `source-reconstruction/README.md` before relying on it.
 
 ## Install
 
-Follow the [beginner installation guide](../docs/INSTALLATION.md).
+Follow the [installation guide](../docs/INSTALLATION.md).
 The Windows executable includes Python and HID support; ADB is installed
 separately. The complete command syntax is in the [CLI reference](../docs/CLI.md).
 
@@ -183,8 +183,9 @@ download or preserve the previous file. A missing local `adb` executable,
 multiple/unauthorized ADB devices, a non-root shell, or a wrong MTD map does not
 trigger either ADB-start command.
 
-Both ADB-start commands are no-ops when the selected ADB device is already
-online. `backup` never invokes either command automatically.
+`start-adb` is a no-op when the selected ADB device is already online.
+`install-adb-startup` still installs the persistent hook for future boots.
+`backup` never invokes either command automatically.
 
 `backup` requires the exact recovered partition sequence and sizes:
 

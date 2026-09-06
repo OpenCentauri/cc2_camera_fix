@@ -39,15 +39,17 @@ class CliTests(unittest.TestCase):
             with self.subTest(argv=argv), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 cli.main(argv)
 
-    def test_dry_run_rejects_hardware_options_even_explicit_defaults(self):
+    def test_dry_run_accepts_hardware_options_without_transport(self):
         for option, value in [
             ("--adb", "adb"), ("--serial", "TEST"),
             ("--bootloader-timeout", "30"), ("--reboot-timeout", "180"),
             ("--adb-timeout", "60"),
+            ("--bootloader-t", "31"),
         ]:
             for suffix in ([option, value], [option + "=" + value]):
-                with self.subTest(suffix=suffix), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
-                    cli.main(["restore", "image", "--backup", "backup.zip", "--dry-run", *suffix])
+                with self.subTest(suffix=suffix), mock.patch.object(cli, "command_plan", return_value=0) as plan, mock.patch.object(cli, "_adb", side_effect=AssertionError("hardware accessed")):
+                    self.assertEqual(cli.main(["restore", "image", "--backup", "backup.zip", "--dry-run", *suffix]), 0)
+                    plan.assert_called_once()
 
     def test_dry_run_validates_every_local_gate_without_transport(self):
         with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
@@ -62,7 +64,7 @@ class CliTests(unittest.TestCase):
             guards = [stack.enter_context(mock.patch.object(cli, name, side_effect=AssertionError("hardware accessed")))
                       for name in ("_adb", "expected_devices", "prepare_restore", "enter_bootloader", "restore_blob", "_confirm", "start_adb_through_upload_command")]
             output = stack.enter_context(redirect_stdout(io.StringIO()))
-            self.assertEqual(cli.main(["restore", str(path), "--backup", "backup.zip", "--dry-run"]), 0)
+            self.assertEqual(cli.main(["restore", str(path), "--backup", "backup.zip", "--dry-run", "--adb", "unused-adb", "--serial", "TEST", "--bootloader-timeout", "31", "--reboot-timeout", "181", "--adb-timeout", "61"]), 0)
             self.assertEqual(events, ["validate_full_restore_image", "validate_replacement_against_backup", "validate_preparation_image"])
             self.assertFalse(json.loads(output.getvalue())["writes_performed"])
             for guard in guards:

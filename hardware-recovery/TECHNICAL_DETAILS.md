@@ -33,7 +33,7 @@ This is a useful isolation test, not proof of this exact flash failure. The buil
 
 For a failed camera, read and rewrite the eight-pin SPI flash with an external programmer. A working camera can use the USB prevention workflow in the main guide. Both use the same image builder.
 
-The recommended beginner setup is:
+The recommended setup is:
 
 - a CH341A/CH341B USB programmer that has been verified for 3.3 V operation;
 - an SOIC-8 test clip and cable, allowing the chip to be accessed on the camera board;

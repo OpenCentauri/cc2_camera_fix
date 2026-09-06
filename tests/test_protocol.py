@@ -1119,16 +1119,18 @@ class CliAdbWorkflowTests(unittest.TestCase):
         install.assert_called_once_with()
         self.assertIn("restart", stdout.getvalue().casefold())
 
-    def test_install_when_adb_online_does_not_write(self):
+    def test_install_when_adb_online_installs_for_future_boots(self):
         fake_adb = mock.Mock()
+        fake_adb.identity_and_partitions.return_value = ("root", [])
         with (
             mock.patch.object(cli, "_adb", return_value=fake_adb),
             mock.patch.object(cli, "install_adb_startup") as install,
             redirect_stdout(io.StringIO()),
+            redirect_stderr(io.StringIO()),
         ):
             status = cli.main(["install-adb-startup", "--yes"])
         self.assertEqual(status, 0)
-        install.assert_not_called()
+        install.assert_called_once_with()
 
     def test_known_bootloader_is_accepted_after_stable_acquisition(self):
         image = b"image"

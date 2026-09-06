@@ -241,9 +241,8 @@ def command_install_adb_startup(args) -> int:
     except AdbUnavailable as unavailable:
         print(f"ADB is unavailable: {unavailable}", file=sys.stderr)
     else:
-        print("ADB is already online; no persistent startup file was installed.")
-        print("You can now run cc2flash backup <output.zip>.")
-        return 0
+        identity, _parts = adb.identity_and_partitions()
+        print(f"ADB is online. Installing startup for future boots. Identity: {identity}")
 
     print("Persistent ADB installation will modify the camera:", file=sys.stderr)
     print(f"  overwrite {ADB_STARTUP_PATH}", file=sys.stderr)
@@ -252,7 +251,7 @@ def command_install_adb_startup(args) -> int:
         f"{ADB_STARTUP_CONTENT.decode('ascii')}",
         file=sys.stderr,
     )
-    print("No flash backup can be read until after a manual restart.", file=sys.stderr)
+    print("The startup hook takes effect on the next boot.", file=sys.stderr)
 
     if not args.yes:
         if not sys.stdin.isatty():
@@ -507,10 +506,6 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     command_parser = parser()
     args = command_parser.parse_args(argv)
-    if getattr(args, "dry_run", False):
-        hardware_options = {"--adb", "--serial", "--bootloader-timeout", "--reboot-timeout", "--adb-timeout"}
-        if any(token.split("=", 1)[0] in hardware_options for token in argv):
-            command_parser.error("--dry-run is offline and cannot be combined with hardware options")
     try:
         return int(args.func(args) or 0)
     except (ProtocolError, image_tools.ValidationError, OSError, EOFError) as exc:

@@ -25,7 +25,7 @@ cc2flash backup OUTPUT.zip [--adb EXECUTABLE] [--serial SERIAL]
 - `install-adb-startup`: overwrite `/etc/conf.d/system.sh` with the known
   ADB startup content. Requires `ENABLE-ADB` confirmation or `--yes`.
   Restart manually afterward; successful installation exits with status 0.
-  If ADB is already online, this command does not install anything.
+  It also installs the hook when temporary ADB is already online.
 - `backup`: require three consecutive identical full reads within five
   attempts, then publish a new ZIP atomically. Never overwrites a backup.
   If ADB is offline, explicitly start it and rerun backup; backup itself is
@@ -48,7 +48,9 @@ cc2flash build-image INPUT [--confirm-read DUMP]... [-o DIR | --output DIR]
 `INPUT` is a raw 8 MiB dump or an unmodified cc2flash backup ZIP.
 Inspection validates without creating files; building creates a recovery bundle
 in a new `<input-stem>-cc2-recovery/` directory unless `--output` is given.
-Existing output directories are refused. Neither command accesses hardware.
+The complete bundle is published atomically; failed builds leave no partial
+bundle at the output path. Existing output directories are refused. Neither
+command accesses hardware.
 
 For raw dumps, repeat `--confirm-read` for each independent matching read:
 
@@ -73,11 +75,27 @@ be rebuilt from one copy.
 mask them. Raw dumps, ZIPs, serial.cfg, and recovery images always contain
 private unit data regardless of report masking.
 
+The bundle contains:
+
+```text
+cc2-camera-recovery.bin
+cc2-camera-layout.txt
+config-restored.bin
+serial.cfg
+MANIFEST.json
+VALIDATION.txt
+FLASHING.txt
+SHA256SUMS.txt
+```
+
+Use the complete `cc2-camera-recovery.bin` for full-chip programming.
+`FLASHING.txt` also contains an advanced flashrom region-write template based
+on regions that actually changed. Always require full-chip verification.
+
 ## USB restore
 
 ```text
-cc2flash restore IMAGE --backup BACKUP.zip --dry-run
-cc2flash restore IMAGE --backup BACKUP.zip
+cc2flash restore IMAGE --backup BACKUP.zip [--dry-run]
     [--adb EXECUTABLE] [--serial SERIAL]
     [--bootloader-timeout SECONDS] [--reboot-timeout SECONDS]
     [--adb-timeout SECONDS]
@@ -85,10 +103,11 @@ cc2flash restore IMAGE --backup BACKUP.zip
 
 `--dry-run` validates the candidate, preserved backup, allowed changes, known
 preparation kernel, and transfer representation entirely offline. It opens no
-transport and writes nothing. Hardware-specific options are rejected with it.
+transport and writes nothing. It accepts the same hardware options as a real
+restore, but does not use or require them.
 It cannot certify the live camera or predict successful physical writing.
 
-A real restore repeats local validation, requires typed `RESTORE-CC2` consent,
+A real restore repeats local validation, requires the user to type `RESTORE-CC2`,
 validates the live camera, applies the temporary SFC correction, and writes the
 full image. Keep power connected until post-write verification completes.
 If needed after reboot, temporary ADB startup requires separate consent.
