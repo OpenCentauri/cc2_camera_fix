@@ -1231,6 +1231,8 @@ class CliAdbWorkflowTests(unittest.TestCase):
                 mock.patch.object(
                     cli, "build_update_blob", return_value=(b"blob", plan)
                 ),
+                mock.patch.object(cli, "validate_preparation_image"),
+                mock.patch.object(cli, "prepare_restore"),
                 mock.patch.object(cli, "enter_bootloader"),
                 mock.patch.object(cli, "wait_for_hid"),
                 mock.patch.object(cli, "restore_blob"),
@@ -1282,6 +1284,8 @@ class CliAdbWorkflowTests(unittest.TestCase):
                 mock.patch.object(
                     cli, "build_update_blob", return_value=(b"blob", plan)
                 ),
+                mock.patch.object(cli, "validate_preparation_image"),
+                mock.patch.object(cli, "prepare_restore"),
                 mock.patch.object(cli, "enter_bootloader"),
                 mock.patch.object(cli, "wait_for_hid"),
                 mock.patch.object(cli, "restore_blob"),
@@ -1344,6 +1348,8 @@ class CliAdbWorkflowTests(unittest.TestCase):
                     "build_update_blob",
                     return_value=(b"blob", mock.sentinel.plan),
                 ),
+                mock.patch.object(cli, "validate_preparation_image"),
+                mock.patch.object(cli, "prepare_restore"),
                 mock.patch.object(cli, "enter_bootloader"),
                 mock.patch.object(cli, "wait_for_hid"),
                 mock.patch.object(cli, "restore_blob"),
@@ -1395,6 +1401,8 @@ class CliAdbWorkflowTests(unittest.TestCase):
                     "build_update_blob",
                     return_value=(b"blob", mock.sentinel.plan),
                 ),
+                mock.patch.object(cli, "validate_preparation_image"),
+                mock.patch.object(cli, "prepare_restore"),
                 mock.patch.object(cli, "enter_bootloader"),
                 mock.patch.object(cli, "wait_for_hid"),
                 mock.patch.object(cli, "restore_blob"),

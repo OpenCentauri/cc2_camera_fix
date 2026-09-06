@@ -10,9 +10,10 @@ the stock Elegoo Centauri Carbon 2 camera firmware found in the supplied
 > transfer, full-flash erase/write, normal reboot, video, and independent
 > three-read verification on one camera. The same test found that the preceding
 > normal-mode trigger can fail destructively when its config-sector target is
-> occupied. The current one-command `restore` path is therefore not ready for
-> end users. Preserve a three-read backup and read
-> `PHYSICAL-VALIDATION.md` before considering further experiments.
+> occupied. A subsequent manual RAM-patched restore succeeded; the integrated
+> automatic preparation still needs hardware validation. Preserve a three-read
+> backup and read [SFC restore preparation](SFC-RESTORE-PREPARATION.md) together
+> with `PHYSICAL-VALIDATION.md` before considering further experiments.
 
 The important result is that the bootloader USB updater is **write-only**. It
 does not implement a flash-read request. The included backup implementation
@@ -275,7 +276,12 @@ cc2flash backup --serial Ucamera001 backup.zip
 
 The exact serial exposed by ADB may differ; use `cc2flash list` to inspect it.
 
-## Restore workflow status (entry path not safe)
+## Restore workflow (automated preparation awaits hardware validation)
+
+Root ADB must already be online; use the separate `start-adb` command if needed.
+Connect only one ADB device and one normal camera HID interface, with matching
+serials. See [SFC restore preparation](SFC-RESTORE-PREPARATION.md) for the exact
+kernel gate, runtime pointer derivation, failure behavior, and hardware evidence.
 
 Validate a candidate without opening USB:
 
@@ -299,18 +305,23 @@ implement. The command currently exists as:
 cc2flash restore fixed.bin --backup backup.zip
 ```
 
-**Do not run that command on an ordinary camera.** Physical validation showed
-that the stock Linux driver may page-program the eight-byte trigger over an
-occupied JFFS2 node without successfully erasing it first. NOR bit constraints
-then produce neither the requested flag nor a bootloader reboot, and the target
-JFFS2 node is damaged. The full byte-level evidence and the later successful
-lab continuation are in [PHYSICAL-VALIDATION.md](PHYSICAL-VALIDATION.md).
+**The integrated preparation still needs a controlled hardware test.** Without
+correcting the live SFC erase size, the stock flag operation can damage an
+occupied JFFS2 node without entering the bootloader. The original failure and
+lab continuation are recorded in [PHYSICAL-VALIDATION.md](PHYSICAL-VALIDATION.md).
+The successful manual patch-plus-restore and the automated checks are documented
+in [SFC-RESTORE-PREPARATION.md](SFC-RESTORE-PREPARATION.md).
 
-The command is intended to print the complete target range and hashes, then
-require the literal confirmation `RESTORE-CC2`. Its planned phases are:
+The command prints the complete target range and hashes, then requires the
+literal confirmation `RESTORE-CC2` unless `--yes` was supplied. Its phases are:
 
 1. Validate `fixed.bin` and both members of `backup.zip` locally.
-2. Send the 8-byte upgrade flag through normal Linux HID.
+2. Require the known kernel, three consecutive identical live reads, and a
+   match to the preserved backup outside the audited recovery regions. Validate
+   root/MTD geometry, kernel symbols/instructions, and the runtime SFC pointer.
+   Sync, set the internal erase size to `0x1000`, and verify it before sending
+   the stock 8-byte upgrade flag through normal Linux HID. No manual config
+   erase or process suspension is performed; `0x4000` is not restored in RAM.
 3. Wait for bootloader HID `a108:ff08`.
 4. Transfer a 128-byte update header plus the image in numbered packets.
 5. Require the bootloader's whole-image MD5 success indication.
@@ -357,12 +368,13 @@ image is then the intended recovery path.
   retransmission remains absent and was not exercised.
 - The bootloader full-flash erase/write, normal reboot, live video, and
   independent three-consecutive-read verification succeeded on one camera.
-  This does not validate the preceding normal-mode trigger or the current
-  end-to-end CLI invocation.
+  The manual RAM-patched trigger also succeeded in a subsequent test. The
+  integrated automatic preparation still awaits physical validation.
 - The stock Linux SFC driver advertises a 16 KiB erase size while its erase
   routine has opcode cases for 4, 32, and 64 KiB only. A boot-specific live RAM
   change to the internal size made 4 KiB sector erases work, confirming the
-  mismatch, but that experiment is not a reusable fix.
+  mismatch. Restore now validates and applies that temporary preparation; it
+  is not a persistent kernel fix and resets on reboot.
 - The explicit persistent ADB recovery overwrites a startup hook before the
   first backup; the temporary upload-command route avoids that file but deliberately
   relies on a vendor command-injection bug. That temporary startup has now been
