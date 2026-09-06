@@ -79,11 +79,18 @@ To validate the complete USB round trip without opening USB:
 cc2flash plan-restore backup-cc2-recovery/cc2-camera-recovery.bin --backup backup.zip
 ```
 
-If that passes, the corresponding guarded write command is:
+The corresponding write command exists, but the current USB entry path is not
+safe on an ordinary camera:
 
 ```sh
 cc2flash restore backup-cc2-recovery/cc2-camera-recovery.bin --backup backup.zip
 ```
+
+Do not run it until USB maintenance implements and validates a safe
+normal-Linux-to-U-Boot transition. The bootloader transfer itself passed a
+physical full-write/readback experiment, but the stock Linux trigger can damage
+an occupied JFFS2 node without entering upgrade mode. See
+[the physical USB validation record](../usb-maintenance/PHYSICAL-VALIDATION.md).
 
 USB maintenance refuses the candidate if any byte outside this builder's
 audited `0x463000–0x46AFFF` system window and

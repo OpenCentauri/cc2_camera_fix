@@ -4,8 +4,8 @@ Some stock Elegoo Centauri Carbon 2 cameras can stop working after repeated
 printer power cycles. This repository provides two ways to protect or recover
 an affected camera:
 
-- a camera that still works can be backed up, patched, and written back
-  through USB so the failure is prevented before it occurs;
+- a camera that still works can be backed up, patched, and restored through
+  USB without opening it or using an external programmer;
 - a camera that no longer starts can be recovered from its own flash backup
   with an external programmer.
 
@@ -82,17 +82,14 @@ to the stock camera. Stop this camera-recovery procedure.
 
 ## Working camera: USB prevention
 
-> **Experimental write path:** USB communication and flash backup have been
-> tested on physical hardware, but a complete USB restore followed by physical
-> readback verification has not yet been completed. The final preventive write
-> can modify the camera's complete flash. Preserve the validated backup and do
-> not continue unless you accept that the restore path remains
-> hardware-unverified.
+> **USB write physically validated:** On the supported camera and firmware,
+> the integrated `cc2flash restore` path dynamically corrected the live SFC
+> erase size, entered the stock bootloader, transferred and wrote the complete
+> image, returned to normal USB, and passed three consecutive full-flash
+> readbacks. See the [physical validation record](usb-maintenance/PHYSICAL-VALIDATION.md).
 
-This route backs up the camera, builds the preventive patch from that backup,
-and writes it back without requiring special hardware like an SPI programmer.
-The current tools are still separate, so the route has four phases: connect the
-camera, make a stable backup, build a preventive image, and restore that image.
+This route backs up the camera, builds its camera-specific preventive image,
+and writes that image through USB without requiring an SPI programmer.
 
 ### What you need
 
@@ -129,11 +126,11 @@ Do not trust wire colors unverified. Before connecting the camera, use a
 multimeter to confirm every conductor from the USB plug to its pogo pin and
 confirm that +5 V is not shorted to ground or either data line.
 
-### Current command sequence
+### USB prevention command sequence
 
 Installation and detailed stop conditions are documented in the
 [USB-maintenance reference](usb-maintenance/REFERENCE.md). After `cc2flash`
-and `adb` are installed, the normal sequence is:
+and `adb` are installed, the supported sequence is:
 
 ```sh
 cc2flash start-adb
@@ -152,8 +149,11 @@ unchanged and in a separate safe location.
 
 The builder validates the backup and creates the camera-specific preventive
 image. `plan-restore` performs the same-camera and allowed-change checks
-without opening USB. A successful plan is necessary but does not remove the
-experimental status of `restore`.
+without opening USB. `restore` repeats those checks, validates the live camera
+against the preserved backup, temporarily prepares the known stock SFC driver,
+and requires the literal confirmation `RESTORE-CC2` before its first write.
+Keep power connected until it returns to normal USB and completes the required
+three-read verification. Preserve both the original ZIP and recovery image.
 
 Stop if any command refuses the camera, backup, firmware, partition layout, or
 generated image. Do not work around a validation failure.
@@ -287,6 +287,7 @@ No full camera dump or vendor firmware image is included in this repository.
 - [Hardware-recovery regression results](hardware-recovery/TEST_RESULTS.md)
 - [USB-maintenance reference](usb-maintenance/REFERENCE.md)
 - [USB project and hardware-validation status](usb-maintenance/PROJECT-STATUS.md)
+- [Physical USB restore validation](usb-maintenance/PHYSICAL-VALIDATION.md)
 - [Recovered USB protocol](usb-maintenance/PROTOCOL.md)
 - [USB reverse-engineering evidence](usb-maintenance/EVIDENCE.md)
 

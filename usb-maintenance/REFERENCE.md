@@ -6,11 +6,15 @@ The normal user journey begins in the [main camera guide](../README.md). This do
 the stock Elegoo Centauri Carbon 2 camera firmware found in the supplied
 8 MiB flash dump.
 
-> **Research status:** the library now decodes bootloader type-2 ACK payloads as
-> `u32le(next_expected_packet)` and rejects unexpected/retry requests instead of
-> treating them as zero. Destructive restore is still hardware-unverified, and
-> automatic retransmission is not implemented. Preserve a three-read backup and
-> read `PROTOCOL.md`, sections 9, 10, and 12 before considering a write.
+> **Research status:** a physical test validated in-order bootloader HID
+> transfer, full-flash erase/write, normal reboot, video, and independent
+> three-read verification on one camera. The same test found that the preceding
+> normal-mode trigger can fail destructively when its config-sector target is
+> occupied. The integrated client now validates and temporarily corrects that
+> live erase-size field; its complete restore path passed physical write and
+> three-read verification on the supported camera. Preserve a three-read backup
+> and read [SFC restore preparation](SFC-RESTORE-PREPARATION.md) together with
+> `PHYSICAL-VALIDATION.md` before restoring.
 
 The important result is that the bootloader USB updater is **write-only**. It
 does not implement a flash-read request. The included backup implementation
@@ -273,7 +277,12 @@ cc2flash backup --serial Ucamera001 backup.zip
 
 The exact serial exposed by ADB may differ; use `cc2flash list` to inspect it.
 
-## Intended restore workflow (not hardware-ready)
+## Restore workflow (physically validated on the supported camera)
+
+Root ADB must already be online; use the separate `start-adb` command if needed.
+Connect only one ADB device and one normal camera HID interface, with matching
+serials. See [SFC restore preparation](SFC-RESTORE-PREPARATION.md) for the exact
+kernel gate, runtime pointer derivation, failure behavior, and hardware evidence.
 
 Validate a candidate without opening USB:
 
@@ -291,17 +300,29 @@ The replacement must match that backup outside the two hardware-recovery
 regions documented above.
 The transport parses each nonfinal ACK as the next expected absolute packet and
 aborts if U-Boot requests retransmission, which this research client does not yet
-implement:
+implement. The command currently exists as:
 
 ```sh
 cc2flash restore fixed.bin --backup backup.zip
 ```
 
-The command is intended to print the complete target range and hashes, then
-require the literal confirmation `RESTORE-CC2`. Its planned phases are:
+Without correcting the live SFC erase size, the stock flag operation can damage
+an occupied JFFS2 node without entering the bootloader. The integrated command
+now validates and applies that temporary preparation before sending the flag.
+The original failure, manual investigation, and successful end-to-end automated
+validation are recorded in [PHYSICAL-VALIDATION.md](PHYSICAL-VALIDATION.md) and
+[SFC-RESTORE-PREPARATION.md](SFC-RESTORE-PREPARATION.md).
+
+The command prints the complete target range and hashes, then requires the
+literal confirmation `RESTORE-CC2` unless `--yes` was supplied. Its phases are:
 
 1. Validate `fixed.bin` and both members of `backup.zip` locally.
-2. Send the 8-byte upgrade flag through normal Linux HID.
+2. Require the known kernel, three consecutive identical live reads, and a
+   match to the preserved backup outside the audited recovery regions. Validate
+   root/MTD geometry, kernel symbols/instructions, and the runtime SFC pointer.
+   Sync, set the internal erase size to `0x1000`, and verify it before sending
+   the stock 8-byte upgrade flag through normal Linux HID. No manual config
+   erase or process suspension is performed; `0x4000` is not restored in RAM.
 3. Wait for bootloader HID `a108:ff08`.
 4. Transfer a 128-byte update header plus the image in numbered packets.
 5. Require the bootloader's whole-image MD5 success indication.
@@ -331,7 +352,7 @@ online. Once ADB is online, stable post-write verification begins as a separate
 operation with the ordinary per-command timeouts; the option does not claim to
 bound up to five complete flash reads.
 
-Do not unplug the camera after the MD5 response.  A failed transfer before the
+Do not unplug the camera after the MD5 response. A failed transfer before the
 MD5 check does not erase flash, but the persistent flag may leave the camera in
 bootloader mode; reconnecting the bootloader and retransmitting a full known
 image is then the intended recovery path.
@@ -344,7 +365,18 @@ image is then the intended recovery path.
   invocation produced matching full reads. The client now requires three
   consecutive matches within five attempts.
 - Bootloader data ACK parsing now matches the disassembly for in-order packets,
-  but automatic retransmission and physical-camera validation remain absent.
+  and one physical in-order transfer completed all 2,742 packets. Automatic
+  retransmission remains absent and was not exercised.
+- The bootloader full-flash erase/write, normal reboot, live video, and
+  independent three-consecutive-read verification succeeded on one camera.
+  The manual RAM-patched trigger and the later integrated automatic preparation
+  both succeeded. The integrated run completed the full write, normal reboot,
+  and required three-read verification.
+- The stock Linux SFC driver advertises a 16 KiB erase size while its erase
+  routine has opcode cases for 4, 32, and 64 KiB only. A boot-specific live RAM
+  change to the internal size made 4 KiB sector erases work, confirming the
+  mismatch. Restore now validates and applies that temporary preparation; it
+  is not a persistent kernel fix and resets on reboot.
 - The explicit persistent ADB recovery overwrites a startup hook before the
   first backup; the temporary upload-command route avoids that file but deliberately
   relies on a vendor command-injection bug. That temporary startup has now been
@@ -368,7 +400,7 @@ See [PROTOCOL.md](PROTOCOL.md) for the recovered wire formats and
 python -m unittest discover -s tests -v
 ```
 
-The 85 tests exercise the 57-entry normal command catalog, all configuration and
+The 106 tests exercise the 57-entry normal command catalog, all configuration and
 upload mappings, command builders, U-Boot frame types/ACK decoders, frame
 vectors, checksums, image headers, packet numbering, partition validation, ADB
 absence/offline/error classification, three-consecutive-of-five acquisition,
@@ -381,5 +413,7 @@ pre-USB wrong-unit rejection,
 bounded/validated availability timeouts, expected final-commit
 failure/disconnection, the Windows `error: closed`
 transport handoff, legacy text-shell parsing, ordered binary MTD pulls and
-temporary-file cleanup, CLI mutation guards, and the HID
-state machines without opening a device.
+temporary-file cleanup, CLI mutation guards, dynamic SFC pointer derivation,
+exact-kernel/instruction/value gates, transport matching, guarded RAM write and
+readback failures, restore ordering, and the HID state machines without opening
+a device.

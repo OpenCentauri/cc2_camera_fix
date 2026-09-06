@@ -1,5 +1,11 @@
 # Static-analysis and runtime evidence
 
+For the first destructive physical restore experiment—including the failed
+normal-mode trigger, kernel erase-size mismatch, successful bootloader write,
+and independent readback—see
+[PHYSICAL-VALIDATION.md](PHYSICAL-VALIDATION.md). Raw dumps, UART logs, host
+paths, serials, and unit-specific hashes are intentionally not published.
+
 ## Inputs
 
 | Artifact | Size | SHA-256 |
