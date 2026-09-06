@@ -10,10 +10,11 @@ the stock Elegoo Centauri Carbon 2 camera firmware found in the supplied
 > transfer, full-flash erase/write, normal reboot, video, and independent
 > three-read verification on one camera. The same test found that the preceding
 > normal-mode trigger can fail destructively when its config-sector target is
-> occupied. A subsequent manual RAM-patched restore succeeded; the integrated
-> automatic preparation still needs hardware validation. Preserve a three-read
-> backup and read [SFC restore preparation](SFC-RESTORE-PREPARATION.md) together
-> with `PHYSICAL-VALIDATION.md` before considering further experiments.
+> occupied. The integrated client now validates and temporarily corrects that
+> live erase-size field; its complete restore path passed physical write and
+> three-read verification on the supported camera. Preserve a three-read backup
+> and read [SFC restore preparation](SFC-RESTORE-PREPARATION.md) together with
+> `PHYSICAL-VALIDATION.md` before restoring.
 
 The important result is that the bootloader USB updater is **write-only**. It
 does not implement a flash-read request. The included backup implementation
@@ -276,7 +277,7 @@ cc2flash backup --serial Ucamera001 backup.zip
 
 The exact serial exposed by ADB may differ; use `cc2flash list` to inspect it.
 
-## Restore workflow (automated preparation awaits hardware validation)
+## Restore workflow (physically validated on the supported camera)
 
 Root ADB must already be online; use the separate `start-adb` command if needed.
 Connect only one ADB device and one normal camera HID interface, with matching
@@ -305,12 +306,12 @@ implement. The command currently exists as:
 cc2flash restore fixed.bin --backup backup.zip
 ```
 
-**The integrated preparation still needs a controlled hardware test.** Without
-correcting the live SFC erase size, the stock flag operation can damage an
-occupied JFFS2 node without entering the bootloader. The original failure and
-lab continuation are recorded in [PHYSICAL-VALIDATION.md](PHYSICAL-VALIDATION.md).
-The successful manual patch-plus-restore and the automated checks are documented
-in [SFC-RESTORE-PREPARATION.md](SFC-RESTORE-PREPARATION.md).
+Without correcting the live SFC erase size, the stock flag operation can damage
+an occupied JFFS2 node without entering the bootloader. The integrated command
+now validates and applies that temporary preparation before sending the flag.
+The original failure, manual investigation, and successful end-to-end automated
+validation are recorded in [PHYSICAL-VALIDATION.md](PHYSICAL-VALIDATION.md) and
+[SFC-RESTORE-PREPARATION.md](SFC-RESTORE-PREPARATION.md).
 
 The command prints the complete target range and hashes, then requires the
 literal confirmation `RESTORE-CC2` unless `--yes` was supplied. Its phases are:
@@ -368,8 +369,9 @@ image is then the intended recovery path.
   retransmission remains absent and was not exercised.
 - The bootloader full-flash erase/write, normal reboot, live video, and
   independent three-consecutive-read verification succeeded on one camera.
-  The manual RAM-patched trigger also succeeded in a subsequent test. The
-  integrated automatic preparation still awaits physical validation.
+  The manual RAM-patched trigger and the later integrated automatic preparation
+  both succeeded. The integrated run completed the full write, normal reboot,
+  and required three-read verification.
 - The stock Linux SFC driver advertises a 16 KiB erase size while its erase
   routine has opcode cases for 4, 32, and 64 KiB only. A boot-specific live RAM
   change to the internal size made 4 KiB sector erases work, confirming the
@@ -398,7 +400,7 @@ See [PROTOCOL.md](PROTOCOL.md) for the recovered wire formats and
 python -m unittest discover -s tests -v
 ```
 
-The 85 tests exercise the 57-entry normal command catalog, all configuration and
+The 106 tests exercise the 57-entry normal command catalog, all configuration and
 upload mappings, command builders, U-Boot frame types/ACK decoders, frame
 vectors, checksums, image headers, packet numbering, partition validation, ADB
 absence/offline/error classification, three-consecutive-of-five acquisition,
@@ -411,5 +413,7 @@ pre-USB wrong-unit rejection,
 bounded/validated availability timeouts, expected final-commit
 failure/disconnection, the Windows `error: closed`
 transport handoff, legacy text-shell parsing, ordered binary MTD pulls and
-temporary-file cleanup, CLI mutation guards, and the HID
-state machines without opening a device.
+temporary-file cleanup, CLI mutation guards, dynamic SFC pointer derivation,
+exact-kernel/instruction/value gates, transport matching, guarded RAM write and
+readback failures, restore ordering, and the HID state machines without opening
+a device.

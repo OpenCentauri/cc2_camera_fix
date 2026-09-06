@@ -95,10 +95,10 @@ The flag sector belongs to mounted JFFS2 and can contain live records; successfu
 upgrade entry does not promise config preservation if the subsequent restore
 fails. The preserved backup remains essential.
 
-## Physical evidence versus automated validation
+## Physical evidence and integrated validation
 
-The developer's supplied `0x1000restore.log` and host transcript establish this
-manual sequence on one tested camera:
+The first supplied UART log and host transcript established this manual
+sequence on the tested camera:
 
 1. Start temporary root ADB through the existing normal-HID command.
 2. Sync and manually set/read back the live field as `0x1000`.
@@ -123,14 +123,41 @@ and the developer read back `0x4000`. The startup-script mitigation does not
 permanently repair this kernel erase path. Config was deliberately not claimed
 byte-exact after the verification boot.
 
+The follow-up test exercised the integrated PR #10 command without any manual
+RAM edit or other preconditioning. It obtained three consecutive identical
+pre-write reads, completed all automated SFC pointer/instruction/value checks,
+set and verified the live field, entered stock bootloader HID, transferred all
+2,742 packets, returned to normal USB, and obtained three consecutive identical
+post-write reads. Those reads matched every boot-stable byte through HWCONFIG;
+config was correctly reported separately after first-boot changes.
+
+Sanitized host result:
+
+```text
+Validating the live camera and preparing its temporary SFC erase size.
+Flash read 3/5 complete; consecutive identical: 3/3
+Entering bootloader HID mode; the 8-byte flag write begins now.
+Transfer: 100% (2742/2742)
+Normal mode returned; requiring three consecutive identical flash reads for post-write verification.
+Flash read 3/5 complete; consecutive identical: 3/3
+Restore complete: three consecutive post-write reads match every boot-stable byte through HWCONFIG.
+```
+
+The accompanying UART capture showed the flag erase/write, exact upgrade words,
+SPL recognition, bootloader HID mode, and completed U-Boot write. The integrated
+flag operation emitted none of the earlier erase errors. Linux later returned
+to its ordinary `0x4000` field and its unrelated runtime erase errors, as
+expected for a temporary preparation.
+
 Offline synthetic tests cover preparation success and refusal paths, dynamic
 heap addresses, matching transport selection, kernel and instruction gates,
 stable-read failures, pointer bounds, unexpected values, sync failure, guarded
-write failure, readback failure, and absence of a HID trigger on refusal. Existing
-post-restore readback tests remain in place. The supplied kernel was independently
-decoded locally; neither it nor the raw log is committed.
+write failure, readback failure, restore ordering, and absence of a HID trigger
+on refusal. Existing post-restore readback tests remain in place. The supplied
+kernel was independently decoded locally; neither it nor either raw log is
+committed.
 
-**Hardware-unverified:** the integrated automatic preparation, other firmware
-revisions, and precise pre-transfer collateral erase footprint. The successful
-manual sequence is evidence for feasibility, not a substitute for testing the
-new automation on hardware.
+**Hardware-verified:** the integrated automatic preparation and complete restore
+passed physical write and three-read readback verification on the supported
+camera and exact gated kernel. Other firmware revisions and the precise
+pre-transfer collateral erase footprint remain unverified.

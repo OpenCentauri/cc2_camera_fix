@@ -1,11 +1,12 @@
 # Physical USB restore validation
 
-**Experiment date:** 2026-09-04  
+**Initial experiment date:** 2026-09-04  
+**Integrated validation date:** 2026-09-06  
 **Hardware:** one `EF-S7-V1.0.30B` camera with an Ingenic T23N and ZB25VQ64
 
-This document records the first destructive physical validation of the USB
-restore path. It deliberately separates what was observed from what is merely
-proposed. Console excerpts have been shortened and all host paths, camera
+This document records the initial destructive investigation and the later
+successful physical validation of the integrated USB restore path. It separates
+direct observations from remaining limits. Console excerpts have been shortened and all host paths, camera
 serials, unit-specific identifiers, and unit-specific image hashes have been
 removed.
 
@@ -16,14 +17,13 @@ removed.
 | Can the U-Boot HID updater receive a complete image? | **Yes**, on the tested camera: all 2,742 packets were accepted and the RAM-image MD5 matched. |
 | Can it erase and write the full 8 MiB flash? | **Yes**, on the tested camera: normal USB returned and an independent three-read ADB backup matched the candidate through HWCONFIG. |
 | Did the camera work afterward? | **Yes**: normal HID returned and a live video picture was observed. |
-| Does the current one-command `cc2flash restore` enter U-Boot reliably? | **No**. Its normal-mode trigger can corrupt an occupied JFFS2 node without producing the required upgrade words. |
-| Is a supported USB-only workaround ready for end users? | **No**. A lab workaround succeeded, but required a boot-specific RAM patch, process control, and a separate continuation after the client timed out. |
+| Does the integrated `cc2flash restore` enter U-Boot reliably? | **Yes**, on the tested supported camera: it dynamically located and corrected the live SFC field, then the stock flag write entered U-Boot without manual preconditioning. |
+| Did the complete integrated restore pass physical verification? | **Yes**: one uninterrupted CLI invocation completed pre-write stable reads, flag creation, bootloader transfer/write, normal reboot, and three-read post-write verification. |
 
-The important distinction is that the **bootloader transfer and full-flash
-write work**, while the current **normal-Linux-to-bootloader transition is
-unsafe and incomplete**. USB-only restore is therefore not categorically
-impossible, but the current CLI must not be presented as a ready end-to-end
-procedure.
+The initial test separated a working bootloader transfer from a broken stock
+Linux trigger. The implemented restore path now validates the exact supported
+kernel and live camera, dynamically prepares the SFC field, and performs that
+transition successfully as part of the complete verified operation.
 
 ## Relevant flash layout
 
@@ -120,8 +120,11 @@ that live field from `0x4000` to `0x1000` caused each 16 KiB MTD erase request
 to be split into supported 4 KiB sector erases. `flash_eraseall /dev/mtd5`
 then completed without driver errors, and all 128 KiB read back as `0xff`.
 
-The field was restored to `0x4000` afterward. This RAM edit is evidence for the
-failure mechanism, not a persistent fix or a reusable command.
+During that diagnostic experiment, the field was restored to `0x4000`
+afterward. The later implementation derives and validates the live pointer,
+sets the field only for the restore transition, and relies on reboot to
+reinitialize the driver; it remains a temporary preparation rather than a
+persistent kernel fix.
 
 ## Lab path that reached U-Boot
 
@@ -157,11 +160,10 @@ flash_flag1 = 0x55504454, flash_flag_2 = 0x010203a1
 Upgrade mode = hid mode!!!
 ```
 
-This proves an erased target can accept the normal daemon's eight-byte program.
-It does **not** validate stopping the daemon during a normal restore; in fact,
-that ordering caused the client timeout. A future implementation would need to
-resume `ucamera` before sending the HID trigger and keep the transition inside
-one bounded, verified orchestration.
+This proved that an erased target could accept the normal daemon's eight-byte
+program and that stopping `ucamera` was the wrong ordering. The integrated path
+therefore leaves `ucamera` running, performs no manual config erase, and keeps
+the validated preparation and HID trigger inside one bounded operation.
 
 ## Bootloader transfer and full-flash write
 
@@ -204,32 +206,64 @@ Therefore the physical evidence validates the in-order bootloader HID transfer,
 full-chip erase/write, normal reboot, video operation, and independent ADB
 readback on this one camera.
 
-## What remains unresolved
+## Integrated automatic restore validation
 
-The following are still engineering choices or unvalidated behaviors:
+The follow-up test exercised PR #10 exactly as implemented, without manually
+changing RAM, manually erasing config, stopping `ucamera`, or using a separate
+transfer continuation:
 
-- The current normal-HID trigger does not safely create its flag on arbitrary
-  occupied config data. Repeating the command cannot set bits that are already
-  zero.
-- No uninterrupted implementation has yet combined ADB startup, dynamic driver
-  discovery, safe process/filesystem quiescing, erase, flag programming,
-  bootloader transfer, and post-write verification.
-- Erasing the whole config partition is destructive but uses the existing MTD
-  utility; erasing only the flag's eraseblock preserves more data but needs a
-  carefully implemented targeted operation. No choice between them is made
-  here.
-- A persistent kernel fix could teach the driver to handle the reported 16 KiB
-  erase geometry, or change how it subdivides erases. That would itself require
-  a separate, validated firmware change.
+1. `cc2flash start-adb --serial <camera>` started temporary root ADB.
+2. `cc2flash restore ... --backup ... --serial <camera>` displayed the complete
+   write plan and received the literal `RESTORE-CC2` confirmation.
+3. The integrated preparation obtained three consecutive identical live flash
+   reads, matched them to the preserved backup, dynamically located and verified
+   the SFC object and its erase-size member, synchronized pending writes, and
+   set/read back `0x1000`.
+4. The stock HID trigger entered bootloader mode. All 2,742 transfer packets were
+   accepted, U-Boot accepted the image MD5, and full-flash erase/write began.
+5. Normal USB returned. After separately confirmed temporary ADB startup, the
+   command obtained three consecutive identical post-write reads in three
+   attempts.
+6. Every boot-stable byte through HWCONFIG matched the candidate. Config changed
+   during the required verification boot and was correctly not claimed
+   byte-exact.
+
+Sanitized host result:
+
+```text
+Validating the live camera and preparing its temporary SFC erase size.
+Flash read 3/5 complete; consecutive identical: 3/3
+Entering bootloader HID mode; the 8-byte flag write begins now.
+Transfer: 100% (2742/2742)
+Bootloader accepted the image MD5 and has started erase/write.
+Normal mode returned; requiring three consecutive identical flash reads for post-write verification.
+Flash read 3/5 complete; consecutive identical: 3/3
+Restore complete: three consecutive post-write reads match every boot-stable byte through HWCONFIG.
+```
+
+The UART capture independently showed the flag erase/write, exact upgrade words,
+SPL recognition, bootloader HID mode, and completed U-Boot write. No
+`transfer length is error,803` occurred during the integrated flag operation.
+The same error reappeared after Linux rebooted with its ordinary `0x4000`
+configuration, confirming again that this preparation is intentionally temporary.
+
+Therefore the integrated `cc2flash restore` path is physically verified end to
+end on the supported camera and kernel: stable preflight readback, automatic RAM
+preparation, stock trigger, stock bootloader transfer/write, reboot, live normal
+USB, and independent stable post-write readback all succeeded.
+
+## Remaining limits
+
+- Physical validation covers one `EF-S7-V1.0.30B`/T23N/ZB25VQ64 camera and
+  the exact gated stock kernel. Other board and firmware revisions remain
+  unsupported unless separately analyzed and added.
 - The live driver-object address must always be derived and verified at runtime.
-  Hard-coding the address observed in this experiment would be unsafe.
-- `SIGSTOP` prevented the shell watchdog from firing in this test, but erasing a
-  mounted read-write JFFS2 filesystem remains risky even when its main user is
-  stopped.
-- Automatic retransmission is still not implemented. The successful physical
-  transfer did not request a retransmission.
-- Other board or firmware revisions remain untested.
-
-Until one of those entry-path designs is selected, implemented, and physically
-validated as one operation, `cc2flash restore` should not be recommended to end
-users. The read-only backup, builder, and `plan-restore` stages remain useful.
+  Hard-coding the address observed in either experiment would be unsafe.
+- The decoded erase loop predicts one 4 KiB physical erase for the eight-byte
+  flag operation, but that precise collateral footprint was not independently
+  measured before the subsequent full-flash write. The preserved backup remains
+  mandatory.
+- Reboot restores the original `0x4000` configuration; this is preparation for
+  the stock update transition, not a persistent fix for later JFFS2 erase/GC.
+- Automatic retransmission is not implemented. Both successful physical
+  transfers proceeded in order without requesting retransmission.

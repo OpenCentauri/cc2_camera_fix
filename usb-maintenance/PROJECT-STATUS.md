@@ -58,17 +58,17 @@
 
 ## Client status
 
-The included Python client is now v0.6.0 with 85 passing offline tests. Its
+The included Python client is now v0.6.0 with 106 passing offline tests. Its
 backup path is strictly read-only and requires three consecutive identical full
 reads within five attempts. Temporary and persistent ADB setup are separate
 commands rather than fallback flags on `backup`. An accepted backup is one ZIP
 archive, so the raw image cannot be published without its evidence manifest.
 The restore path parses type-2 payloads as the next expected absolute packet and
 rejects a retransmission request with an explicit error; automatic
-retransmission is not implemented. A physical in-order transfer completed all
-2,742 packets and reached the full-flash erase/write path. The current command
-is nevertheless not end-user ready because the preceding normal-mode upgrade
-trigger has a confirmed destructive failure mode.
+retransmission is not implemented. A physical integrated restore completed the automatic live SFC preparation,
+all 2,742 packets, full-flash erase/write, normal reboot, and required
+three-read post-write verification. The earlier unprepared trigger failure is
+now detected and avoided by exact-kernel, live-state, and readback gates.
 
 Before opening USB, restore now compares the replacement with `flash.bin` from
 the validated preserved ZIP. Only hardware recovery's exact SquashFS patch
@@ -117,8 +117,9 @@ malformed-device states remain refusals.
   mismatch: the driver was configured for `0x4000`, while the sector-erase
   routine has opcode cases only for `0x1000`, `0x8000`, and `0x10000`.
   Temporarily changing the boot-specific live field to `0x1000` made complete
-  MTD erases succeed. That dynamic RAM edit is diagnostic evidence, not a
-  reusable fix.
+  MTD erases succeed. Restore now derives, validates, changes, and reads back
+  that field immediately before the stock flag operation. Reboot resets it, so
+  this remains temporary preparation rather than a persistent fix.
 - After experimental config preconditioning, SPL read the exact upgrade words
   and bootloader HID `a108:ff08` enumerated. A one-off continuation transmitted
   all 2,742 packets. U-Boot accepted the RAM-image MD5, erased and wrote the
@@ -128,10 +129,12 @@ malformed-device states remain refusals.
   reads in three attempts. Boot through HWCONFIG matched the candidate exactly;
   strict validation passed, while config differed only as expected from the
   clean-data first boot. `system.sh` was absent.
-- The tested sequence was not one uninterrupted client operation. It required
-  a boot-specific RAM patch, process control, a filesystem-unsafe erase while
-  JFFS2 remained mounted, and a separate transfer continuation after the
-  original CLI timed out. It must not be presented as an end-user workflow.
+- A later test exercised the integrated client as one uninterrupted operation,
+  without a manual RAM edit, config erase, process suspension, or separate
+  continuation. It obtained three stable pre-write reads, completed the dynamic
+  preparation and stock HID transition, wrote the image, returned to normal
+  USB, and obtained three stable post-write reads matching every boot-stable
+  byte through HWCONFIG.
 - No direct USB flash-read command was found. The temporary ADB route avoids
   installing a persistent file: it attempts a tmpfs removal, starts `/bin/adbd`,
   and then reaches the vendor's `sync` plus expected failing `fopen`. Normal
