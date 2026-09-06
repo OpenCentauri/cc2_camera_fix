@@ -82,12 +82,6 @@ to the stock camera. Stop this camera-recovery procedure.
 
 ## Working camera: USB prevention
 
-> **USB write physically validated:** On the supported camera and firmware,
-> the integrated `cc2flash restore` path dynamically corrected the live SFC
-> erase size, entered the stock bootloader, transferred and wrote the complete
-> image, returned to normal USB, and passed three consecutive full-flash
-> readbacks. See the [physical validation record](usb-maintenance/PHYSICAL-VALIDATION.md).
-
 This route backs up the camera, builds its camera-specific preventive image,
 and writes that image through USB without requiring an SPI programmer.
 
