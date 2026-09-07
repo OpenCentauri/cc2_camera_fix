@@ -13,8 +13,8 @@ the repository. The recovery image must match it outside the audited system
 patch window and config partition. Start root ADB explicitly before restore:
 
 ```sh
-cc2flash start-adb --serial <camera-serial>
-cc2flash restore fixed.bin --backup backup.zip --serial <camera-serial>
+cc2camera start-adb --serial <camera-serial>
+cc2camera restore fixed.bin --backup backup.zip --serial <camera-serial>
 ```
 
 The preparation requires exactly one online ADB device and one normal camera
@@ -102,7 +102,7 @@ sequence on the tested camera:
 
 1. Start temporary root ADB through the existing normal-HID command.
 2. Sync and manually set/read back the live field as `0x1000`.
-3. Run ordinary `cc2flash restore`, leaving `ucamera` running and not manually
+3. Run ordinary `cc2camera restore`, leaving `ucamera` running and not manually
    erasing config.
 4. Complete all 2,742 packets, return to normal USB, and obtain three consecutive
    identical post-write reads matching every boot-stable byte through HWCONFIG.

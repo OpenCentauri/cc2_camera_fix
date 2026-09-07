@@ -2,7 +2,7 @@
 
 The normal user journey begins in the [main camera guide](../README.md). This document retains the complete installation, command, API, protocol-status, limitation, and test reference.
 
-`cc2flash` is a safety-focused maintenance client and protocol description for
+`cc2camera` is a safety-focused maintenance client and protocol description for
 the stock Elegoo Centauri Carbon 2 camera firmware found in the supplied
 8 MiB flash dump.
 
@@ -60,7 +60,7 @@ root. Run the offline suite there with `python -m unittest discover -s tests -v`
 
 ## Public Python command API
 
-`cc2flash.commands` mirrors the complete recovered command surface, including
+`cc2camera.commands` mirrors the complete recovered command surface, including
 commands that the CLI does not currently use. The module is intentionally
 side-effect free and contains large audit comments beside the numeric tables,
 wire builders, binary-address anchors, state requirements, and hazards.
@@ -82,7 +82,7 @@ The public catalog contains:
 For example, these calls only construct and inspect bytes; they do not open USB:
 
 ```python
-from cc2flash.commands import (
+from cc2camera.commands import (
     ConfigurationKey,
     NormalCommand,
     build_config_get_request,
@@ -90,7 +90,7 @@ from cc2flash.commands import (
     build_upload_target_request,
     describe_normal_command,
 )
-from cc2flash.protocol import parse_normal_report
+from cc2camera.protocol import parse_normal_report
 
 request = build_config_get_request(ConfigurationKey.SENSOR_NAME)
 assert parse_normal_report(request).command == 0x2F50
@@ -114,9 +114,9 @@ reports mutate the device; building them does not.
 Connect exactly one camera in normal USB mode, then:
 
 ```sh
-cc2flash devices
-cc2flash device-info
-cc2flash backup backup.zip
+cc2camera devices
+cc2camera device-info
+cc2camera backup backup.zip
 ```
 
 Without any setup and before `adbd` starts, the stock camera always exposes its
@@ -129,8 +129,8 @@ If ADB is already online, `backup` proceeds without a normal-HID write. To start
 the installed daemon only for this boot, use the separate command:
 
 ```sh
-cc2flash start-adb
-cc2flash backup backup.zip
+cc2camera start-adb
+cc2camera backup backup.zip
 ```
 
 This sends `0x3000`, the immutable no-space target
@@ -153,7 +153,7 @@ errors and earlier upload failures remain fatal. Override the wait only when
 necessary:
 
 ```sh
-cc2flash start-adb --timeout 60
+cc2camera start-adb --timeout 60
 ```
 
 This route does not install a persistent file or require a restart. The vendor
@@ -164,9 +164,9 @@ writes never reach flash. It specifically avoids the known `system.sh` change.
 For optional persistent ADB, obtain online root ADB and preserve a backup first:
 
 ```sh
-cc2flash start-adb
-cc2flash backup backup.zip
-cc2flash install-adb-startup --backup backup.zip
+cc2camera start-adb
+cc2camera backup backup.zip
+cc2camera install-adb-startup --backup backup.zip
 ```
 
 If installing the erase fix too, install it before optional persistent ADB so
@@ -210,7 +210,7 @@ prints the exact observed hash. After independently reviewing it, that one
 value can be accepted explicitly:
 
 ```sh
-cc2flash backup --accept-bootloader-sha256 <observed-sha256> backup.zip
+cc2camera backup --accept-bootloader-sha256 <observed-sha256> backup.zip
 ```
 
 The supplied value must exactly match the newly observed hash. Only then does
@@ -234,8 +234,8 @@ Pass the unmodified ZIP directly to the hardware-recovery builder; its embedded
 three-consecutive-read evidence satisfies that tool's physical-read gate:
 
 ```sh
-cc2flash inspect-image backup.zip
-cc2flash build-image backup.zip
+cc2camera inspect-image backup.zip
+cc2camera build-image backup.zip
 ```
 
 The builder writes
@@ -246,7 +246,7 @@ evidence required by restore.
 Validate the resulting pair without opening USB:
 
 ```sh
-cc2flash restore --dry-run \
+cc2camera restore --dry-run \
   backup-cc2-recovery/cc2-camera-recovery.bin \
   --backup backup.zip
 ```
@@ -261,10 +261,10 @@ or an image with unsupported additional edits from being written.
 If ADB lists more than one device, pass the camera serial explicitly:
 
 ```sh
-cc2flash backup --serial Ucamera001 backup.zip
+cc2camera backup --serial Ucamera001 backup.zip
 ```
 
-The exact serial exposed by ADB may differ; use `cc2flash devices` to inspect it.
+The exact serial exposed by ADB may differ; use `cc2camera devices` to inspect it.
 
 ## Restore workflow (physically validated on the supported camera)
 
@@ -276,7 +276,7 @@ kernel gate, runtime pointer derivation, failure behavior, and hardware evidence
 Validate a candidate without opening USB:
 
 ```sh
-cc2flash restore --dry-run fixed.bin --backup backup.zip
+cc2camera restore --dry-run fixed.bin --backup backup.zip
 ```
 
 A full restore requires exactly `0x800000` bytes.  It also rejects an image
@@ -292,7 +292,7 @@ aborts if U-Boot requests retransmission, which this research client does not ye
 implement. The command currently exists as:
 
 ```sh
-cc2flash restore fixed.bin --backup backup.zip
+cc2camera restore fixed.bin --backup backup.zip
 ```
 
 Without correcting the live SFC erase size, the stock flag operation can damage

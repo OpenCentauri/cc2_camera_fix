@@ -14,7 +14,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from types import SimpleNamespace
 import zipfile
 
-from cc2flash.adb_backup import (
+from cc2camera.adb_backup import (
     AdbClient,
     AdbUnavailable,
     BACKUP_IMAGE_MEMBER,
@@ -35,9 +35,9 @@ from cc2flash.adb_backup import (
     validate_preserved_backup,
     validate_replacement_against_backup,
 )
-from cc2flash import cli
-from cc2flash import hid_transport
-from cc2flash.protocol import (
+from cc2camera import cli
+from cc2camera import hid_transport
+from cc2camera.protocol import (
     BOOT_DATA_SIZE,
     BOOT_REPORT_SIZE,
     FLASH_SIZE,
@@ -258,7 +258,7 @@ class BackupTests(unittest.TestCase):
             path = Path(directory) / "backup.zip"
             with (
                 mock.patch(
-                    "cc2flash.adb_backup.os.link",
+                    "cc2camera.adb_backup.os.link",
                     side_effect=OSError("publish failed"),
                 ),
                 self.assertRaisesRegex(OSError, "publish failed"),
@@ -280,7 +280,7 @@ class BackupTests(unittest.TestCase):
             path = Path(directory) / "backup.zip"
             with (
                 mock.patch(
-                    "cc2flash.adb_backup.os.link",
+                    "cc2camera.adb_backup.os.link",
                     side_effect=publish_competing_archive,
                 ),
                 self.assertRaisesRegex(ProtocolError, "overwrite"),
@@ -333,7 +333,7 @@ class BackupTests(unittest.TestCase):
 
         fake_adb = FakeAdb()
         with (
-            mock.patch("cc2flash.adb_backup.bootloader_reference") as reference,
+            mock.patch("cc2camera.adb_backup.bootloader_reference") as reference,
             self.assertRaisesRegex(
                 ProtocolError, "five complete.*three consecutive"
             ),
@@ -495,7 +495,7 @@ class BackupTests(unittest.TestCase):
             stdout=b"",
             stderr=b"error: no devices/emulators found\n",
         )
-        with mock.patch("cc2flash.adb_backup.subprocess.run", return_value=result):
+        with mock.patch("cc2camera.adb_backup.subprocess.run", return_value=result):
             with self.assertRaises(AdbUnavailable):
                 AdbClient().ensure_available()
 
@@ -505,7 +505,7 @@ class BackupTests(unittest.TestCase):
             stdout=b"",
             stderr=b"error: device offline\n",
         )
-        with mock.patch("cc2flash.adb_backup.subprocess.run", return_value=result):
+        with mock.patch("cc2camera.adb_backup.subprocess.run", return_value=result):
             with self.assertRaisesRegex(AdbUnavailable, "not online"):
                 AdbClient().ensure_available()
 
@@ -525,7 +525,7 @@ class BackupTests(unittest.TestCase):
         ]
         client = AdbClient(serial="Ucamera001")
         with mock.patch(
-            "cc2flash.adb_backup.subprocess.run", side_effect=responses
+            "cc2camera.adb_backup.subprocess.run", side_effect=responses
         ) as run:
             identity, parts = client.identity_and_partitions()
         self.assertEqual(identity, "uid=0(root) gid=0(root)")
@@ -597,7 +597,7 @@ class BackupTests(unittest.TestCase):
         ]
         with (
             mock.patch.object(client, "ensure_available", side_effect=states) as check,
-            mock.patch("cc2flash.adb_backup.time.sleep") as sleep,
+            mock.patch("cc2camera.adb_backup.time.sleep") as sleep,
         ):
             client.wait_for_device(timeout=30)
         self.assertEqual(check.call_count, 3)
@@ -611,7 +611,7 @@ class BackupTests(unittest.TestCase):
                 "ensure_available",
                 side_effect=ProtocolError("ADB device is not usable (unauthorized)"),
             ) as check,
-            mock.patch("cc2flash.adb_backup.time.sleep") as sleep,
+            mock.patch("cc2camera.adb_backup.time.sleep") as sleep,
             self.assertRaisesRegex(ProtocolError, "unauthorized"),
         ):
             client.wait_for_device(timeout=30)
@@ -628,7 +628,7 @@ class BackupTests(unittest.TestCase):
                 "ensure_available",
                 side_effect=ProtocolError("ADB availability check timed out: adb get-state"),
             ) as check,
-            mock.patch("cc2flash.adb_backup.time.sleep") as sleep,
+            mock.patch("cc2camera.adb_backup.time.sleep") as sleep,
             self.assertRaisesRegex(ProtocolError, "availability check timed out"),
         ):
             client.wait_for_device(timeout=30)
@@ -644,13 +644,13 @@ class BackupTests(unittest.TestCase):
         )
         with (
             mock.patch(
-                "cc2flash.adb_backup.subprocess.run", return_value=offline
+                "cc2camera.adb_backup.subprocess.run", return_value=offline
             ) as run,
             mock.patch(
-                "cc2flash.adb_backup.time.monotonic",
+                "cc2camera.adb_backup.time.monotonic",
                 side_effect=[100.0, 100.25, 101.0],
             ),
-            mock.patch("cc2flash.adb_backup.time.sleep") as sleep,
+            mock.patch("cc2camera.adb_backup.time.sleep") as sleep,
             self.assertRaisesRegex(ProtocolError, "timed out waiting for ADB"),
         ):
             client.wait_for_device(timeout=1)
@@ -666,10 +666,10 @@ class BackupTests(unittest.TestCase):
                 side_effect=AdbUnavailable("ADB camera is not online (offline)"),
             ),
             mock.patch(
-                "cc2flash.adb_backup.time.monotonic",
+                "cc2camera.adb_backup.time.monotonic",
                 side_effect=[10.0, 10.25, 11.0],
             ),
-            mock.patch("cc2flash.adb_backup.time.sleep") as sleep,
+            mock.patch("cc2camera.adb_backup.time.sleep") as sleep,
             self.assertRaisesRegex(ProtocolError, "last state:.*offline"),
         ):
             client.wait_for_device(timeout=1)
@@ -681,7 +681,7 @@ class BackupTests(unittest.TestCase):
             stdout=b"",
             stderr=b"error: more than one device/emulator\n",
         )
-        with mock.patch("cc2flash.adb_backup.subprocess.run", return_value=result):
+        with mock.patch("cc2camera.adb_backup.subprocess.run", return_value=result):
             with self.assertRaisesRegex(ProtocolError, "not usable") as raised:
                 AdbClient().ensure_available()
         self.assertNotIsInstance(raised.exception, AdbUnavailable)
@@ -917,8 +917,8 @@ class CliAdbWorkflowTests(unittest.TestCase):
         save.assert_not_called()
         error = stderr.getvalue()
         self.assertIn("strictly read-only", error)
-        self.assertIn("cc2flash start-adb", error)
-        self.assertNotIn("cc2flash install-adb-startup", error)
+        self.assertIn("cc2camera start-adb", error)
+        self.assertNotIn("cc2camera install-adb-startup", error)
 
     def test_plan_restore_can_prove_preserved_backup_compatibility(self):
         image = b"replacement image"

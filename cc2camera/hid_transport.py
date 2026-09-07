@@ -49,7 +49,7 @@ def _hid_module():
         import hid  # type: ignore
     except ImportError as exc:
         raise ProtocolError(
-            "HID support could not load. Reinstall the complete cc2flash package "
+            "HID support could not load. Reinstall the complete cc2camera package "
             "or download the Windows executable from the project's GitHub Releases."
         ) from exc
     return hid
@@ -110,7 +110,7 @@ def exchange_normal(
 ) -> NormalFrame:
     """Send one already-built request and require an echoed success reply.
 
-    This is the public transport counterpart to :mod:`cc2flash.commands`.
+    This is the public transport counterpart to :mod:`cc2camera.commands`.
     Keeping construction separate makes the complete command surface available
     to library users without performing I/O at import/build time.  The function
     cannot make privileged SET/upload/upgrade reports safe; callers must inspect

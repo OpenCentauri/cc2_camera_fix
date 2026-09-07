@@ -1,20 +1,20 @@
-# cc2flash command reference
+# cc2camera command reference
 
 Install using the [setup guide](INSTALLATION.md). Start with the workflows in
 the [main guide](../README.md); these options are for reference.
-Every command accepts `--help`. `cc2flash --version` reports the installed version.
-On Windows PowerShell, use `.\cc2flash.exe` for a downloaded executable in the
-current folder. Python installations also support `python -m cc2flash`.
+Every command accepts `--help`. `cc2camera --version` reports the installed version.
+On Windows PowerShell, use `.\cc2camera.exe` for a downloaded executable in the
+current folder. Python installations also support `python -m cc2camera`.
 
 ## Connected camera
 
 ```text
-cc2flash devices [--adb EXECUTABLE]
-cc2flash device-info [--adb EXECUTABLE] [--serial SERIAL]
-cc2flash start-adb [--adb EXECUTABLE] [--serial SERIAL] [--timeout SECONDS]
-cc2flash install-adb-startup --backup BACKUP.zip [--adb EXECUTABLE] [--serial SERIAL] [--yes]
-cc2flash install-erase-fix --backup BACKUP.zip [--adb EXECUTABLE] [--serial SERIAL] [--yes]
-cc2flash backup OUTPUT.zip [--adb EXECUTABLE] [--serial SERIAL]
+cc2camera devices [--adb EXECUTABLE]
+cc2camera device-info [--adb EXECUTABLE] [--serial SERIAL]
+cc2camera start-adb [--adb EXECUTABLE] [--serial SERIAL] [--timeout SECONDS]
+cc2camera install-adb-startup --backup BACKUP.zip [--adb EXECUTABLE] [--serial SERIAL] [--yes]
+cc2camera install-erase-fix --backup BACKUP.zip [--adb EXECUTABLE] [--serial SERIAL] [--yes]
+cc2camera backup OUTPUT.zip [--adb EXECUTABLE] [--serial SERIAL]
     [--accept-bootloader-sha256 SHA256]
 ```
 
@@ -49,13 +49,13 @@ It does not relax the restore requirement for exactly one connected camera.
 ## Offline image work
 
 ```text
-cc2flash inspect-image INPUT [--confirm-read DUMP]... [--show-identifiers]
-cc2flash build-image INPUT [--confirm-read DUMP]... [-o DIR | --output DIR]
+cc2camera inspect-image INPUT [--confirm-read DUMP]... [--show-identifiers]
+cc2camera build-image INPUT [--confirm-read DUMP]... [-o DIR | --output DIR]
     [--config-mode {serial-only,preserve-files}]
     [--wipe-unknown-config] [--allow-fewer-reads] [--show-identifiers]
 ```
 
-`INPUT` is a raw 8 MiB dump or an unmodified cc2flash backup ZIP.
+`INPUT` is a raw 8 MiB dump or an unmodified cc2camera backup ZIP.
 Inspection validates without creating files; building creates a recovery bundle
 in a new `<input-stem>-cc2-recovery/` directory unless `--output` is given.
 The complete bundle is published atomically; failed builds leave no partial
@@ -65,7 +65,7 @@ command accesses hardware.
 For raw dumps, repeat `--confirm-read` for each independent matching read:
 
 ```sh
-cc2flash build-image camera-1.bin --confirm-read camera-2.bin --confirm-read camera-3.bin
+cc2camera build-image camera-1.bin --confirm-read camera-2.bin --confirm-read camera-3.bin
 ```
 
 A valid ZIP supplies its own three-consecutive-read evidence. Every raw input
@@ -104,7 +104,7 @@ on regions that actually changed. Always require full-chip verification.
 ## USB restore
 
 ```text
-cc2flash restore IMAGE --backup BACKUP.zip [--dry-run]
+cc2camera restore IMAGE --backup BACKUP.zip [--dry-run]
     [--adb EXECUTABLE] [--serial SERIAL]
     [--bootloader-timeout SECONDS] [--reboot-timeout SECONDS]
     [--adb-timeout SECONDS]

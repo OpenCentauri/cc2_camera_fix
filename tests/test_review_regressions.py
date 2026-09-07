@@ -6,9 +6,9 @@ import tempfile
 import unittest
 from unittest import mock
 
-from cc2flash import cli, image
-from cc2flash.bundle import staged_directory
-from cc2flash.protocol import ProtocolError
+from cc2camera import cli, image
+from cc2camera.bundle import staged_directory
+from cc2camera.protocol import ProtocolError
 
 
 class BundleTests(unittest.TestCase):
@@ -63,7 +63,7 @@ class BundleTests(unittest.TestCase):
     def test_publication_error_cleans_staging(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "recovery"
-            with mock.patch("cc2flash.bundle.rename_new", side_effect=OSError("rename failed")), self.assertRaises(OSError):
+            with mock.patch("cc2camera.bundle.rename_new", side_effect=OSError("rename failed")), self.assertRaises(OSError):
                 with staged_directory(target) as staging:
                     (staging / "image.bin").write_bytes(b"complete")
             self.assertEqual(list(Path(directory).iterdir()), [])

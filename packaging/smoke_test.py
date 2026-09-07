@@ -1,13 +1,14 @@
 """Exercise an installed/frozen console application without a physical camera."""
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
 
 
 def main():
-    executable = str(Path(sys.argv[1]).resolve())
+    executable = str(Path(shutil.which(sys.argv[1]) or sys.argv[1]).resolve())
     with tempfile.TemporaryDirectory() as directory:
         def run(*args, expected=0):
             result = subprocess.run(
@@ -20,7 +21,8 @@ def main():
 
         run("--version")
         help_text = run("--help").stdout
-        for command in ("devices", "device-info", "start-adb", "install-adb-startup",
+        assert "usage: cc2camera " in help_text, help_text
+        for command in ("devices", "device-info", "start-adb", "install-adb-startup", "install-erase-fix",
                         "backup", "inspect-image", "build-image", "restore"):
             assert command in help_text, command
             run(command, "--help")
@@ -31,7 +33,7 @@ def main():
         run("restore", "missing.bin", "--backup", "missing.zip", "--dry-run", expected=2)
         Path(directory, "invalid.bin").write_bytes(b"not a supported image")
         failure = run("build-image", "invalid.bin", expected=2)
-        assert "cc2flash: error:" in failure.stderr, failure.stderr
+        assert "cc2camera: error:" in failure.stderr, failure.stderr
         assert not Path(directory, "invalid-cc2-recovery").exists()
 
 

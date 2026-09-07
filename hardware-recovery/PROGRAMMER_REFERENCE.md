@@ -50,7 +50,7 @@ All-`00`, all-`FF`, unstable, differently hashed, wrong-size, or intermittently 
 Build the recovery image from those reads:
 
 ```bat
-cc2flash build-image cc2-camera-1.bin --confirm-read cc2-camera-2.bin --confirm-read cc2-camera-3.bin
+cc2camera build-image cc2-camera-1.bin --confirm-read cc2-camera-2.bin --confirm-read cc2-camera-3.bin
 ```
 
 #### Full-chip erase, program, and verify

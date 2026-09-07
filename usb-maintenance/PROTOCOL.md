@@ -663,7 +663,7 @@ This choice is runtime-grounded: on Windows 11 with ADB 35.0.2, a live
 
 ### 9.1 Temporary upload-command start
 
-`cc2flash start-adb` uses two confirmed bugs without weakening
+`cc2camera start-adb` uses two confirmed bugs without weakening
 the general upload-path API:
 
 1. literal targets are truncated only at the first ASCII space; and
@@ -713,7 +713,7 @@ uploader state.
 
 ### 9.2 Persistent startup hook
 
-The supported command is `cc2flash install-adb-startup --backup BACKUP.zip`.
+The supported command is `cc2camera install-adb-startup --backup BACKUP.zip`.
 It requires already-online root ADB, a preserved same-camera backup, three
 consecutive stable live reads and sufficient clean config space. Consent is
 `ENABLE-ADB` or explicit `--yes`.

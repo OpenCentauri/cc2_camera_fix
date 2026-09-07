@@ -46,6 +46,7 @@ CONFIG_START = 0x7E0000
 CONFIG_END = 0x800000
 CONFIG_SIZE = CONFIG_END - CONFIG_START
 
+# Stable on-disk schema identifier, independent of the CLI/package name.
 USB_BACKUP_FORMAT = "cc2flash-backup-v2"
 USB_BACKUP_IMAGE_MEMBER = "flash.bin"
 USB_BACKUP_MANIFEST_MEMBER = "manifest.json"
@@ -210,7 +211,7 @@ def image_hashes(data: bytes) -> dict[str, str | int]:
 
 
 def _validate_usb_backup_manifest(manifest: Any, image: bytes) -> dict[str, Any]:
-    """Validate acquisition evidence produced by usb-maintenance/cc2flash."""
+    """Validate acquisition evidence produced by cc2camera."""
 
     if not isinstance(manifest, dict):
         raise ValidationError("USB backup manifest must be a JSON object")
@@ -300,7 +301,7 @@ def _validate_usb_backup_manifest(manifest: Any, image: bytes) -> dict[str, Any]
 
 
 def read_image_source(path: Path) -> tuple[bytes, dict[str, Any]]:
-    """Read a raw dump or a strict cc2flash backup ZIP without extracting it."""
+    """Read a raw dump or a strict cc2camera backup ZIP without extracting it."""
 
     if path.suffix.casefold() != ".zip":
         image = path.read_bytes()
@@ -1712,7 +1713,7 @@ def build_recovery(
     """
         write_text(output_dir / layout_name, layout)
 
-        tool_filename = "cc2flash"
+        tool_filename = "cc2camera"
         preserved_files_manifest: list[dict[str, Any]] = []
         if config_mode == "preserve-files":
             live_config_files = analysis["live_config_files"]

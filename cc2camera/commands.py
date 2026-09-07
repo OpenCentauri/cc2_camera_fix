@@ -3,7 +3,7 @@
 This module is the public, side-effect-free command layer.  It deliberately
 contains no HID device discovery and performs no USB I/O.  A caller can inspect
 the catalogs or build exact wire reports without connecting a camera; sending a
-report is an explicit operation in :mod:`cc2flash.hid_transport`.
+report is an explicit operation in :mod:`cc2camera.hid_transport`.
 
 The names and values below mirror ``PROTOCOL.md`` and the annotated source in
 ``source-reconstruction/``.  They are firmware-specific to the analyzed
@@ -745,6 +745,7 @@ _SAFE_UPLOAD_PATH = re.compile(rb"\A[A-Za-z0-9_./-]+\Z")
 # This is firmware-specific behavior, not a general shell-command API.  Keep
 # the value constant, below the daemon's 128-byte target buffer, and free of
 # literal whitespace.
+# Keep the hardware-validated wire payload independent of the CLI name.
 ADB_UPLOAD_COMMAND_TARGET = b"/tmp/.cc2flash-adbd-bootstrap;/bin/adbd&"
 
 

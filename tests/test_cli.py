@@ -6,11 +6,24 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest import mock
-from cc2flash import cli, image
-from cc2flash.protocol import ProtocolError
+from cc2camera import cli, image
+from cc2camera.protocol import ProtocolError
 
 
 class CliTests(unittest.TestCase):
+    def test_command_name_in_help_and_errors(self):
+        self.assertEqual(cli.parser().prog, "cc2camera")
+        self.assertIn("usage: cc2camera ", cli.parser().format_help())
+        with mock.patch.object(cli, "_adb") as adb, redirect_stderr(io.StringIO()) as error:
+            self.assertEqual(cli.main(["restore", "missing.bin", "--backup", "missing.zip", "--dry-run"]), 2)
+        self.assertIn("cc2camera: error:", error.getvalue())
+        adb.assert_not_called()
+
+    def test_suggested_python_invocation_uses_camera_package(self):
+        from cc2camera import display
+        with mock.patch.object(display.sys, "frozen", False, create=True):
+            self.assertIn("-m cc2camera", display.invocation("backup", "backup.zip"))
+
     def test_exact_command_surface(self):
         import argparse
         action = next(a for a in cli.parser()._actions if isinstance(a, argparse._SubParsersAction))

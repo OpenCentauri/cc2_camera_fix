@@ -6,7 +6,7 @@ import sys
 import unittest
 
 
-from cc2flash import image as tool
+from cc2camera import image as tool
 
 
 def hwconfig_record(length: int, extension: bytes = b"") -> bytes:

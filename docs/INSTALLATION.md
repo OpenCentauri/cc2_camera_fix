@@ -1,28 +1,28 @@
-# Install cc2flash
+# Install cc2camera
 
 ## Windows: standalone executable
 
 1. Open the [GitHub Releases page](https://github.com/phryneas/cc2_camera_fix/releases).
 2. Choose a release and expand **Assets**.
-3. Download **cc2flash.exe** to a new folder, for example `Documents\CC2-camera`.
+3. Download **cc2camera.exe** to a new folder, for example `Documents\CC2-camera`.
 4. In File Explorer, open that folder, click its address bar, type `cmd`,
    and press Enter. This opens Command Prompt in the correct folder.
 5. Paste this command and press Enter:
 
 ```bat
-cc2flash.exe --version
+cc2camera.exe --version
 ```
 
 It should print a version number. Keep this window open for the recovery
 instructions. Do not double-click the executable: it is a command-line tool.
 In PowerShell, prefix a local executable with `.\`, for example
-`.\cc2flash.exe --version`.
+`.\cc2camera.exe --version`.
 
 The executable is unsigned; Windows may show a reputation warning. Check that
 you obtained it from this repository's intended release. Do not disable your
 antivirus. If you are not comfortable running it, use the Python route below.
-Each release build also attaches `cc2flash.exe.sha256`; you can compare its
-digest with `certutil -hashfile cc2flash.exe SHA256`. This checks download
+Each release build also attaches `cc2camera.exe.sha256`; you can compare its
+digest with `certutil -hashfile cc2camera.exe SHA256`. This checks download
 integrity, not publisher identity.
 
 Assets appear only after the release build succeeds. If a release has no
@@ -41,15 +41,15 @@ platform-tools folder** into your CC2-camera folder; keep its DLLs beside
 
 ```bat
 platform-tools\adb.exe version
-cc2flash.exe devices --adb "platform-tools\adb.exe"
+cc2camera.exe devices --adb "platform-tools\adb.exe"
 ```
 
 Add `--adb "platform-tools\adb.exe"` to connected-camera commands in the guide.
 For example:
 
 ```bat
-cc2flash.exe start-adb --adb "platform-tools\adb.exe"
-cc2flash.exe backup backup.zip --adb "platform-tools\adb.exe"
+cc2camera.exe start-adb --adb "platform-tools\adb.exe"
+cc2camera.exe backup backup.zip --adb "platform-tools\adb.exe"
 ```
 
 `restore --dry-run` accepts these options but does not access ADB or USB.
@@ -68,19 +68,19 @@ Windows Command Prompt, in your working folder:
 
 ```bat
 py -m venv .venv
-.venv\Scripts\python.exe -m pip install "cc2flash @ https://github.com/phryneas/cc2_camera_fix/archive/refs/tags/TAG.zip"
-.venv\Scripts\python.exe -m cc2flash --version
+.venv\Scripts\python.exe -m pip install "cc2camera @ https://github.com/phryneas/cc2_camera_fix/archive/refs/tags/TAG.zip"
+.venv\Scripts\python.exe -m cc2camera --version
 ```
 
 Linux/macOS:
 
 ```sh
 python3 -m venv .venv
-.venv/bin/python -m pip install "cc2flash @ https://github.com/phryneas/cc2_camera_fix/archive/refs/tags/TAG.zip"
-.venv/bin/python -m cc2flash --version
+.venv/bin/python -m pip install "cc2camera @ https://github.com/phryneas/cc2_camera_fix/archive/refs/tags/TAG.zip"
+.venv/bin/python -m cc2camera --version
 ```
 
-Use that same Python path followed by `-m cc2flash` in place of `cc2flash`
+Use that same Python path followed by `-m cc2camera` in place of `cc2camera`
 throughout the guide. No environment activation or PATH edit is needed.
 HID support is installed with the package. ADB remains separate.
 On Linux, your distribution may require its Python venv package and USB device

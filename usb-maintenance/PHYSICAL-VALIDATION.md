@@ -17,7 +17,7 @@ removed.
 | Can the U-Boot HID updater receive a complete image? | **Yes**, on the tested camera: all 2,742 packets were accepted and the RAM-image MD5 matched. |
 | Can it erase and write the full 8 MiB flash? | **Yes**, on the tested camera: normal USB returned and an independent three-read ADB backup matched the candidate through HWCONFIG. |
 | Did the camera work afterward? | **Yes**: normal HID returned and a live video picture was observed. |
-| Does the integrated `cc2flash restore` enter U-Boot reliably? | **Yes**, on the tested supported camera: it dynamically located and corrected the live SFC field, then the stock flag write entered U-Boot without manual preconditioning. |
+| Does the integrated `cc2camera restore` enter U-Boot reliably? | **Yes**, on the tested supported camera: it dynamically located and corrected the live SFC field, then the stock flag write entered U-Boot without manual preconditioning. |
 | Did the complete integrated restore pass physical verification? | **Yes**: one uninterrupted CLI invocation completed pre-write stable reads, flag creation, bootloader transfer/write, normal reboot, and three-read post-write verification. |
 
 The initial test separated a working bootloader transfer from a broken stock
@@ -192,7 +192,7 @@ After normal USB mode returned:
 
 - the camera produced a live video picture;
 - temporary root ADB startup succeeded through normal HID;
-- `cc2flash backup` obtained three consecutive identical 8 MiB reads in three
+- `cc2camera backup` obtained three consecutive identical 8 MiB reads in three
   attempts;
 - every byte from boot through the end of HWCONFIG (`0x000000–0x7dffff`)
   matched the validated candidate;
@@ -212,8 +212,8 @@ The follow-up test exercised PR #10 exactly as implemented, without manually
 changing RAM, manually erasing config, stopping `ucamera`, or using a separate
 transfer continuation:
 
-1. `cc2flash start-adb --serial <camera>` started temporary root ADB.
-2. `cc2flash restore ... --backup ... --serial <camera>` displayed the complete
+1. `cc2camera start-adb --serial <camera>` started temporary root ADB.
+2. `cc2camera restore ... --backup ... --serial <camera>` displayed the complete
    write plan and received the literal `RESTORE-CC2` confirmation.
 3. The integrated preparation obtained three consecutive identical live flash
    reads, matched them to the preserved backup, dynamically located and verified
@@ -247,7 +247,7 @@ SPL recognition, bootloader HID mode, and completed U-Boot write. No
 The same error reappeared after Linux rebooted with its ordinary `0x4000`
 configuration, confirming again that this preparation is intentionally temporary.
 
-Therefore the integrated `cc2flash restore` path is physically verified end to
+Therefore the integrated `cc2camera restore` path is physically verified end to
 end on the supported camera and kernel: stable preflight readback, automatic RAM
 preparation, stock trigger, stock bootloader transfer/write, reboot, live normal
 USB, and independent stable post-write readback all succeeded.

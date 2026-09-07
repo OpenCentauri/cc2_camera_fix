@@ -2,6 +2,9 @@
 from .restore_prepare import INSTRUCTIONS, SYMBOLS
 from .adb_backup import EXPECTED_PARTITIONS
 
+# These v1 script bytes are an installed-file contract: startup.py recognizes
+# only exact contents. Keep their cc2flash markers and log prefixes stable so
+# existing installations remain idempotent and can add the other managed hook.
 RUNNER = b'''#!/bin/sh
 # cc2flash hook runner v1
 PATH=/bin:/sbin:/usr/bin:/usr/sbin
