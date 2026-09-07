@@ -129,12 +129,13 @@ There is no override or `--force` option for a mismatching firmware build. A ref
 
 A complete raw dump cannot be compared by ignoring only the visible serial string. JFFS2 appends new nodes on each boot, so two otherwise identical cameras naturally have different raw `config` histories. The HWCONFIG partition also contains a per-unit UOID and an associated two-byte value.
 
-Two exact shapes of its type-12 length-prefixed record are supported:
+The known 256-byte prefix of its type-12 length-prefixed record is validated.
+Two payload lengths have been directly observed:
 
-| Variant | Encoded payload length | Bytes after the original 256-byte payload |
+| Observed shape | Encoded payload length | Bytes after the known 256-byte prefix |
 |---|---:|---|
 | `type12-length256` | 256 (`0x0100`) | none |
-| `type12-length261-trailer-0000029840` | 261 (`0x0105`) | `00 00 02 98 40` |
+| `type12-length261` | 261 (`0x0105`) | `00 00 02 98 40` |
 
 The second shape was observed in a third stable three-read dump. Its boot,
 kernel, root, system, stock startup-script window, partition layout, identity
@@ -143,25 +144,32 @@ record length exactly includes the five added bytes. The camera's own
 `ucamera` executable advances over this structure as a little-endian 16-bit
 type, a little-endian 16-bit payload length, and that many payload bytes.
 
-The meaning of the five-byte extension is unknown. The validator therefore
-accepts only the exact observed length/trailer combination and its complete
-variant-specific invariant fingerprints. It rejects arbitrary extensions,
-nearby lengths, and mixtures of the two variants. Recovery preserves the
-complete input HWCONFIG partition byte-for-byte.
+The meaning of the five-byte extension is unknown, so its value is not treated
+as a firmware invariant. The validator requires record type 12, requires at
+least the complete known 256-byte prefix, and requires the declared payload to
+end within the HWCONFIG partition. Any additional length-delimited bytes are
+treated as an opaque extension and reported by length and SHA-256. For
+comparison with the reference firmware, the payload length is normalized to
+256 and each extension byte to zero. Recovery preserves the complete input
+HWCONFIG partition byte-for-byte.
 
 The validator therefore performs the strongest safe equivalent of “100% match apart from unit data”:
 
-1. Every firmware byte that should be invariant must match the exact fingerprints for one recognized HWCONFIG record variant.
+1. Every firmware byte that should be invariant must match the exact fingerprints after normalizing the bounded HWCONFIG extension.
 2. The 32 KiB SquashFS window containing `bashrc.sh` must equal either the exact stock hash or the exact audited patched hash.
-3. Only these unit-specific or mutable fields are excluded from the invariant hash:
+3. These fields are excluded from or normalized for the invariant hash:
 
 ```text
 0x7D200B–0x7D200C  two-byte HWCONFIG unit check value
 0x7D2011–0x7D206E  94-byte HWCONFIG UOID
+0x7D2002–0x7D2003  normalized type-12 payload length
+0x7D2104–record end  opaque type-12 extension, when present
 0x7E0000–0x7FFFFF  writable JFFS2 config log
 ```
 
 4. The excluded fields are still validated:
+   - the type-12 length must cover the known prefix and remain inside HWCONFIG;
+   - the extension length and SHA-256 are recorded;
    - the UOID must have the expected 94-byte structure;
    - `config` must contain CRC-valid JFFS2 nodes;
    - serial-only accepts only the six known filenames unless
@@ -196,11 +204,15 @@ The builder:
 
 This is a mitigation for the deterministic per-boot write leak. It does not repair the underlying Ingenic SFC/JFFS2 erase-size defect. Other software that performs persistent writes could still consume config space.
 
-The tool supports only the exact firmware build and HWCONFIG shapes represented by the embedded fingerprints. A future Elegoo/Jovision build or another HWCONFIG record shape must be analyzed and fingerprinted separately.
+The tool supports only the exact firmware build and known type-12 HWCONFIG
+prefix represented by the embedded fingerprints. It accepts a bounded opaque
+extension, but a future Elegoo/Jovision build or a different record type or
+known-prefix layout must be analyzed and fingerprinted separately.
 
 Three real unit identities were directly inspected, including one with the
-261-byte HWCONFIG record. Invariant firmware must match the identified variant
-exactly, while the UOID and serial must each match their observed structure.
+261-byte HWCONFIG record. Invariant firmware and the known HWCONFIG prefix must
+match exactly after extension normalization, while the UOID and serial must
+each match their observed structure.
 All unit-specific HWCONFIG bytes and the recovered serial payload are preserved
 exactly. Because the proprietary full serial↔UOID derivation is unknown, the
 tool does not infer or enforce a relationship between those independently

@@ -69,6 +69,18 @@ class ImplementationTests(unittest.TestCase):
 
     def test_serial_and_uoid_are_validated_independently(self):
         image = bytearray(b"\0" * tool.FLASH_SIZE)
+        extension = bytes.fromhex("deadbeef0001")
+        record_length = 0x100 + len(extension)
+        image[tool.HW_RECORD_START:tool.HW_RECORD_START + 2] = (12).to_bytes(
+            2, "little"
+        )
+        image[
+            tool.HW_RECORD_START + 2:tool.HW_RECORD_PAYLOAD_START
+        ] = record_length.to_bytes(2, "little")
+        image[
+            tool.HW_KNOWN_PAYLOAD_END:
+            tool.HW_KNOWN_PAYLOAD_END + len(extension)
+        ] = extension
         uoid = b"12PSSSS4DIFF" + b"A" * 82
         image[tool.HW_UOID_START:tool.HW_UOID_END] = uoid
         image[tool.HW_CHECK_START:tool.HW_CHECK_END] = b"\x01\x02"
@@ -83,15 +95,16 @@ class ImplementationTests(unittest.TestCase):
         )
         image = bytes(image)
 
-        variant = {
-            "before_identity_sha256": tool.sha256(
-                image[0x7D0000:tool.HW_CHECK_START]
-            ),
-            "after_uoid_sha256": tool.sha256(
-                image[tool.HW_UOID_END:tool.CONFIG_START]
-            ),
-            "invariant_sha256": tool.sha256(tool.invariant_bytes(image)),
-        }
+        _, hwconfig_record = tool.identify_hwconfig_variant(image)
+        before_identity_sha256 = tool.sha256(
+            tool.normalized_hwconfig_before_identity(image)
+        )
+        after_uoid_sha256 = tool.sha256(
+            tool.normalized_hwconfig_after_uoid(image, hwconfig_record)
+        )
+        invariant_sha256 = tool.sha256(
+            tool.invariant_bytes(image, hwconfig_record)
+        )
 
         with TemporaryDirectory() as temp:
             root = Path(temp)
@@ -111,8 +124,18 @@ class ImplementationTests(unittest.TestCase):
                 ),
                 mock.patch.object(
                     tool,
-                    "identify_hwconfig_variant",
-                    return_value=("synthetic", variant),
+                    "HWCONFIG_BEFORE_IDENTITY_SHA256",
+                    before_identity_sha256,
+                ),
+                mock.patch.object(
+                    tool,
+                    "HWCONFIG_AFTER_UOID_SHA256",
+                    after_uoid_sha256,
+                ),
+                mock.patch.object(
+                    tool,
+                    "NORMALIZED_INVARIANT_SHA256",
+                    invariant_sha256,
                 ),
             ):
                 result = tool.build_recovery(
@@ -131,6 +154,18 @@ class ImplementationTests(unittest.TestCase):
                 image[0x7D0000:tool.CONFIG_START],
             )
             self.assertEqual(recovery[tool.HW_UOID_START:tool.HW_UOID_END], uoid)
+            self.assertEqual(
+                recovery[
+                    tool.HW_KNOWN_PAYLOAD_END:
+                    tool.HW_KNOWN_PAYLOAD_END + len(extension)
+                ],
+                extension,
+            )
+            self.assertEqual(result["analysis"]["hwconfig_extension_length"], 6)
+            self.assertEqual(
+                result["analysis"]["hwconfig_extension_sha256"],
+                tool.sha256(extension),
+            )
             self.assertEqual((output / "serial.cfg").read_bytes(), serial_payload)
             rebuilt = tool.extract_serial_and_config_info(
                 recovery[tool.CONFIG_START:tool.CONFIG_END]
@@ -144,6 +179,14 @@ class ImplementationTests(unittest.TestCase):
             )
             generated_manifest = json.loads(
                 (output / "MANIFEST.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                generated_manifest["validation"]["hwconfig_extension_length"],
+                len(extension),
+            )
+            self.assertEqual(
+                generated_manifest["validation"]["hwconfig_extension_sha256"],
+                tool.sha256(extension),
             )
             self.assertNotIn(
                 "serial_uoid_prefix_match", generated_manifest["validation"]

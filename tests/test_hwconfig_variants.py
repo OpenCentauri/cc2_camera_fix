@@ -23,34 +23,67 @@ def hwconfig_record(length: int, extension: bytes = b"") -> bytes:
 
 class HwconfigVariantTests(unittest.TestCase):
     def test_original_256_byte_record_is_supported(self):
-        name, _ = tool.identify_hwconfig_variant(hwconfig_record(0x100))
+        name, record = tool.identify_hwconfig_variant(hwconfig_record(0x100))
         self.assertEqual(name, "type12-length256")
+        self.assertEqual(record["extension_length"], 0)
 
-    def test_observed_261_byte_record_and_exact_extension_are_supported(self):
-        name, _ = tool.identify_hwconfig_variant(
+    def test_observed_261_byte_record_is_supported(self):
+        name, record = tool.identify_hwconfig_variant(
             hwconfig_record(0x105, bytes.fromhex("0000029840"))
         )
-        self.assertEqual(name, "type12-length261-trailer-0000029840")
+        self.assertEqual(name, "type12-length261")
+        self.assertEqual(record["extension_length"], 5)
 
-    def test_arbitrary_261_byte_extension_is_rejected(self):
-        with self.assertRaisesRegex(tool.ValidationError, "unsupported exact shape"):
+    def test_unknown_extension_content_and_length_are_supported(self):
+        extension = bytes.fromhex("deadbeef0001")
+        name, record = tool.identify_hwconfig_variant(
+            hwconfig_record(0x106, extension)
+        )
+        self.assertEqual(name, "type12-length262")
+        self.assertEqual(record["extension_length"], len(extension))
+        self.assertEqual(record["extension_sha256"], tool.sha256(extension))
+
+    def test_extension_is_normalized_without_hiding_later_mutations(self):
+        original = hwconfig_record(0x100)
+        observed = hwconfig_record(0x105, bytes.fromhex("0000029840"))
+        changed_trailer = hwconfig_record(0x105, bytes.fromhex("0000029841"))
+        extended = hwconfig_record(0x106, bytes.fromhex("deadbeef0001"))
+        _, original_record = tool.identify_hwconfig_variant(original)
+        _, observed_record = tool.identify_hwconfig_variant(observed)
+        _, changed_trailer_record = tool.identify_hwconfig_variant(changed_trailer)
+        _, extended_record = tool.identify_hwconfig_variant(extended)
+        normalized = tool.invariant_bytes(original, original_record)
+        for image, record in (
+            (observed, observed_record),
+            (changed_trailer, changed_trailer_record),
+            (extended, extended_record),
+        ):
+            self.assertEqual(normalized, tool.invariant_bytes(image, record))
+
+        mutated = bytearray(extended)
+        mutated[extended_record["record_end"] + 1] = 1
+        self.assertNotEqual(
+            tool.invariant_bytes(original, original_record),
+            tool.invariant_bytes(bytes(mutated), extended_record),
+        )
+
+    def test_short_known_payload_is_rejected(self):
+        with self.assertRaisesRegex(tool.ValidationError, "shorter"):
             tool.identify_hwconfig_variant(
-                hwconfig_record(0x105, bytes.fromhex("0000029841"))
+                hwconfig_record(0xFF)
             )
 
-    def test_unobserved_record_length_is_rejected(self):
-        with self.assertRaisesRegex(tool.ValidationError, "payload_length=262"):
-            tool.identify_hwconfig_variant(
-                hwconfig_record(0x106, bytes.fromhex("000002984000"))
-            )
+    def test_record_extending_beyond_hwconfig_is_rejected(self):
+        length = tool.CONFIG_START - tool.HW_RECORD_PAYLOAD_START + 1
+        with self.assertRaisesRegex(tool.ValidationError, "beyond"):
+            tool.identify_hwconfig_variant(hwconfig_record(length))
 
     def test_non_type12_record_is_rejected(self):
         image = bytearray(hwconfig_record(0x100))
         image[tool.HW_RECORD_START:tool.HW_RECORD_START + 2] = (13).to_bytes(2, "little")
-        with self.assertRaisesRegex(tool.ValidationError, "type=13"):
+        with self.assertRaisesRegex(tool.ValidationError, "type 13"):
             tool.identify_hwconfig_variant(bytes(image))
 
 
 if __name__ == "__main__":
     unittest.main()
-

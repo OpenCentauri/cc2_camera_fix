@@ -66,8 +66,9 @@ EXPECTED_USB_PARTITIONS = (
 )
 
 # The HWCONFIG type-12 record contains a unit-specific two-byte check value and
-# a 94-byte encrypted/encoded UOID. Two exact record shapes have been observed.
-# Both are accepted only with their complete variant-specific invariant hashes.
+# a 94-byte encrypted/encoded UOID in its known 256-byte prefix. Some cameras
+# append opaque bytes to that payload. The record length bounds those bytes;
+# recovery preserves them exactly but normalizes them for invariant hashing.
 HW_RECORD_START = 0x7D2000
 HW_RECORD_PAYLOAD_START = HW_RECORD_START + 4
 HW_KNOWN_PAYLOAD_END = HW_RECORD_PAYLOAD_START + 0x100
@@ -104,26 +105,18 @@ REFERENCE_SEGMENTS = {
     "hwconfig_between_identity_fields": (0x7D200D, 0x7D2011, "3c3351dc1dedcd627419e02de4fc8202e2d507d786c26f142b767fd9859d0cb4"),
 }
 
-# Exact supported type-12 record shapes and their variant-specific hashes.
-# The 261-byte record's five-byte extension is directly observed, but its
-# semantic meaning is unknown. Arbitrary record lengths or extension bytes are
-# deliberately not accepted.
-HWCONFIG_VARIANTS = {
-    "type12-length256": {
-        "record_length": 0x100,
-        "extension": b"",
-        "before_identity_sha256": "0e1514680c4e25e5c431adae5d4cb98bac14746b6e8fc30eb346ec75249f7cc5",
-        "after_uoid_sha256": "98d0beba4c7328a7237bc1a18fdd5e3da64c9f009e3b1c253ea39167a6dabd97",
-        "invariant_sha256": "7346221d7814c8ef4412ced5f3795891f077f89ba64cf61d087e01fc5344f62f",
-    },
-    "type12-length261-trailer-0000029840": {
-        "record_length": 0x105,
-        "extension": bytes.fromhex("0000029840"),
-        "before_identity_sha256": "b0aa28d193004cfbefc4d339a44681bddbbcb57e1ff653c4697e43834352e149",
-        "after_uoid_sha256": "4ea5fb2a33d91a471aab8e923168b30ab4be5d05869e6095ba793e167b9199e0",
-        "invariant_sha256": "8b0d60148f6205bc76adb6429375b0353db175e85a6b1c384da9a7ac3460d921",
-    },
-}
+# These hashes use the type-12 record's canonical 256-byte payload length and
+# zero bytes in place of any declared extension. This retains exact checking of
+# all known bytes without treating an unknown opaque extension as firmware.
+HWCONFIG_BEFORE_IDENTITY_SHA256 = (
+    "0e1514680c4e25e5c431adae5d4cb98bac14746b6e8fc30eb346ec75249f7cc5"
+)
+HWCONFIG_AFTER_UOID_SHA256 = (
+    "98d0beba4c7328a7237bc1a18fdd5e3da64c9f009e3b1c253ea39167a6dabd97"
+)
+NORMALIZED_INVARIANT_SHA256 = (
+    "7346221d7814c8ef4412ced5f3795891f077f89ba64cf61d087e01fc5344f62f"
+)
 
 ORIGINAL_PATCH_SHA256 = "5591f5350feabb73fd29e21ae72ee9c3c9dab0c6bb78e02178267e5cb2ab4780"
 PATCHED_PATCH_SHA256 = "36e9b9b29dffcd775b094ff67a121fbb78b1871a7eda059371cbafc562251b2b"
@@ -1175,12 +1168,37 @@ def build_preserved_config(files: Iterable[ConfigFile]) -> bytes:
     return built
 
 
-def invariant_bytes(image: bytes) -> bytes:
+def normalized_hwconfig_before_identity(image: bytes) -> bytes:
+    return (
+        image[0x7D0000:HW_RECORD_START + 2]
+        + (0x100).to_bytes(2, "little")
+        + image[HW_RECORD_PAYLOAD_START:HW_CHECK_START]
+    )
+
+
+def normalized_hwconfig_after_uoid(
+    image: bytes, record: dict[str, Any]
+) -> bytes:
+    extension_length = record["extension_length"]
+    return (
+        image[HW_UOID_END:HW_KNOWN_PAYLOAD_END]
+        + b"\0" * extension_length
+        + image[record["record_end"]:CONFIG_START]
+    )
+
+
+def invariant_bytes(
+    image: bytes, record: dict[str, Any] | None = None
+) -> bytes:
+    if record is None:
+        _, record = identify_hwconfig_variant(image)
     return (
         image[:PATCH_START]
-        + image[PATCH_END:HW_CHECK_START]
+        + image[PATCH_END:HW_RECORD_START + 2]
+        + (0x100).to_bytes(2, "little")
+        + image[HW_RECORD_PAYLOAD_START:HW_CHECK_START]
         + image[HW_CHECK_END:HW_UOID_START]
-        + image[HW_UOID_END:CONFIG_START]
+        + normalized_hwconfig_after_uoid(image, record)
     )
 
 
@@ -1191,16 +1209,32 @@ def identify_hwconfig_variant(image: bytes) -> tuple[str, dict[str, Any]]:
     record_length = int.from_bytes(
         image[HW_RECORD_START + 2:HW_RECORD_PAYLOAD_START], "little"
     )
-    for name, variant in HWCONFIG_VARIANTS.items():
-        if record_type != 12 or record_length != variant["record_length"]:
-            continue
-        extension_end = HW_KNOWN_PAYLOAD_END + len(variant["extension"])
-        if image[HW_KNOWN_PAYLOAD_END:extension_end] == variant["extension"]:
-            return name, variant
-    raise ValidationError(
-        "HWCONFIG type-12 record has an unsupported exact shape "
-        f"(type={record_type}, payload_length={record_length})"
-    )
+    if record_type != 12:
+        raise ValidationError(
+            f"HWCONFIG record has type {record_type}; expected type 12"
+        )
+    if record_length < 0x100:
+        raise ValidationError(
+            "HWCONFIG type-12 payload is shorter than its known 256-byte "
+            f"prefix (payload_length={record_length})"
+        )
+    record_end = HW_RECORD_PAYLOAD_START + record_length
+    if record_end > CONFIG_START:
+        raise ValidationError(
+            "HWCONFIG type-12 payload extends beyond the HWCONFIG partition "
+            f"(payload_length={record_length})"
+        )
+
+    extension_length = record_length - 0x100
+    name = f"type12-length{record_length}"
+    return name, {
+        "record_type": record_type,
+        "record_length": record_length,
+        "record_end": record_end,
+        "extension_start": HW_KNOWN_PAYLOAD_END,
+        "extension_length": extension_length,
+        "extension_sha256": sha256(image[HW_KNOWN_PAYLOAD_END:record_end]),
+    }
 
 
 def verify_confirmation_reads(
@@ -1258,28 +1292,13 @@ def analyze_image(
     full_hash = sha256(image)
 
     try:
-        hwconfig_variant, variant = identify_hwconfig_variant(image)
+        hwconfig_variant, hwconfig_record = identify_hwconfig_variant(image)
     except ValidationError as exc:
         errors.append(str(exc))
         hwconfig_variant = "unsupported"
-        variant = None
+        hwconfig_record = None
 
     expected_segments = dict(REFERENCE_SEGMENTS)
-    if variant is not None:
-        expected_segments.update(
-            {
-                "hwconfig_before_identity_check": (
-                    0x7D0000,
-                    HW_CHECK_START,
-                    variant["before_identity_sha256"],
-                ),
-                "hwconfig_after_uoid": (
-                    HW_UOID_END,
-                    CONFIG_START,
-                    variant["after_uoid_sha256"],
-                ),
-            }
-        )
 
     segment_results: dict[str, Any] = {}
     for name, (start, end, expected_hash) in expected_segments.items():
@@ -1299,12 +1318,49 @@ def analyze_image(
                 "the supported reference firmware"
             )
 
-    actual_invariant_hash = sha256(invariant_bytes(image))
-    if variant is not None and actual_invariant_hash != variant["invariant_sha256"]:
-        errors.append(
-            "The combined invariant firmware fingerprint does not match the "
-            "identified HWCONFIG variant"
-        )
+    actual_invariant_hash = "unavailable"
+    if hwconfig_record is not None:
+        normalized_segments = {
+            "hwconfig_before_identity_check": (
+                0x7D0000,
+                HW_CHECK_START,
+                HWCONFIG_BEFORE_IDENTITY_SHA256,
+                normalized_hwconfig_before_identity(image),
+            ),
+            "hwconfig_after_uoid": (
+                HW_UOID_END,
+                CONFIG_START,
+                HWCONFIG_AFTER_UOID_SHA256,
+                normalized_hwconfig_after_uoid(image, hwconfig_record),
+            ),
+        }
+        for name, (start, end, expected_hash, normalized_bytes) in (
+            normalized_segments.items()
+        ):
+            actual_hash = sha256(normalized_bytes)
+            ok = actual_hash == expected_hash
+            segment_results[name] = {
+                "start": start,
+                "end_exclusive": end,
+                "size": end - start,
+                "expected_sha256": expected_hash,
+                "actual_sha256": actual_hash,
+                "match": ok,
+                "normalized": True,
+            }
+            if not ok:
+                errors.append(
+                    f"{name} 0x{start:06X}-0x{end - 1:06X} does not match "
+                    "the supported reference firmware after normalizing the "
+                    "HWCONFIG extension"
+                )
+
+        actual_invariant_hash = sha256(invariant_bytes(image, hwconfig_record))
+        if actual_invariant_hash != NORMALIZED_INVARIANT_SHA256:
+            errors.append(
+                "The combined normalized invariant firmware fingerprint does "
+                "not match the supported reference firmware"
+            )
 
     patch_region = image[PATCH_START:PATCH_END]
     patch_hash = sha256(patch_region)
@@ -1366,6 +1422,8 @@ def analyze_image(
         "invariant_sha256": actual_invariant_hash,
         "invariant_match": True,
         "hwconfig_variant": hwconfig_variant,
+        "hwconfig_extension_length": hwconfig_record["extension_length"],
+        "hwconfig_extension_sha256": hwconfig_record["extension_sha256"],
         "segment_results": segment_results,
         "system_state": system_state,
         "system_patch_sha256": patch_hash,
@@ -1436,9 +1494,11 @@ def format_analysis(analysis: dict[str, Any], show_serial: bool = False) -> str:
     )
     segment_lines = []
     for name, result in analysis["segment_results"].items():
+        normalized = " (normalized)" if result.get("normalized") else ""
         segment_lines.append(
             f"  PASS  {name:<34} "
             f"0x{result['start']:06X}-0x{result['end_exclusive'] - 1:06X}"
+            f"{normalized}"
         )
 
     warning_block = ""
@@ -1461,11 +1521,13 @@ Reference match
 ---------------
 Invariant fingerprint:   PASS
 Invariant SHA-256:       {analysis['invariant_sha256']}
-HWCONFIG variant:        {analysis['hwconfig_variant']}
+HWCONFIG record:         {analysis['hwconfig_variant']}
+HWCONFIG extension:      {analysis['hwconfig_extension_length']} bytes
+Extension SHA-256:       {analysis['hwconfig_extension_sha256']}
 System patch state:      {analysis['system_state']}
 System window SHA-256:   {analysis['system_patch_sha256']}
 
-Exact invariant segments:
+Invariant segments:
 {chr(10).join(segment_lines)}
 
 Unit-specific data
@@ -1701,6 +1763,12 @@ def build_recovery(
                 "invariant_sha256": analysis["invariant_sha256"],
                 "invariant_match": True,
                 "hwconfig_variant": analysis["hwconfig_variant"],
+                "hwconfig_extension_length": analysis[
+                    "hwconfig_extension_length"
+                ],
+                "hwconfig_extension_sha256": analysis[
+                    "hwconfig_extension_sha256"
+                ],
                 "system_state_before": analysis["system_state"],
                 "system_state_after": output_analysis["system_state"],
                 "serial_source": analysis["serial_source"],

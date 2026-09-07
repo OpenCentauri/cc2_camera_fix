@@ -67,18 +67,19 @@ byte-for-byte with the newly generated clean-data image in this review.
 
 ## Regression and rejection tests
 
-- Both exact type-12 HWCONFIG record shapes (256-byte payload and the observed
-  261-byte payload with trailer `00 00 02 98 40`): accepted.
-- A one-byte trailer mutation, an unobserved 262-byte record, and a non-type-12
-  record: rejected.
+- The observed type-12 HWCONFIG records with 256-byte and 261-byte payloads are
+  accepted. Unknown extension bytes and a synthetic 262-byte payload are also
+  accepted after normalization and preserved exactly.
+- A payload shorter than the known 256-byte prefix, a payload extending beyond
+  HWCONFIG, and a non-type-12 record are rejected. Mutations after the declared
+  extension remain covered by invariant validation.
 - A locally reconstructed full image with the third camera's invariant variant
   bytes passed strict analysis and recovery generation; the generated image
   retained HWCONFIG byte-for-byte. This is software validation, not a physical
   flash or boot test of that camera.
 - Two distinct real serial/UOID pairs: accepted and preserved.
 - Structurally valid synthetic third unit with two confirmation reads (three total): accepted and preserved.
-- A raw image carrying legacy exact-reference metadata with only one read:
-  rejected unless `--allow-fewer-reads` is explicit.
+- A raw image with only one read: rejected unless `--allow-fewer-reads` is explicit.
 - One-bit kernel mutation: rejected.
 - One-bit system-patch-window mutation: rejected.
 - Structurally valid serial and UOID values with different prefixes: accepted

@@ -11,14 +11,19 @@
     "start": "0x7E0000",
     "validation": "JFFS2 structure/CRCs, known names, unambiguous serial"
   },
-  "format_version": 3,
+  "format_version": 4,
   "full_size": 8388608,
   "invariant_definition": {
-    "excluded_ranges": [
+    "excluded_or_normalized_ranges": [
       {
         "end_inclusive": "0x46AFFF",
         "reason": "separately validated stock/patched bashrc SquashFS window",
         "start": "0x463000"
+      },
+      {
+        "end_inclusive": "0x7D2003",
+        "reason": "normalized type-12 payload length",
+        "start": "0x7D2002"
       },
       {
         "end_inclusive": "0x7D200C",
@@ -29,29 +34,34 @@
         "end_inclusive": "0x7D206E",
         "reason": "unit-specific 94-byte HWCONFIG UOID",
         "start": "0x7D2011"
+      },
+      {
+        "end_inclusive": "declared record end minus one",
+        "reason": "length-delimited opaque type-12 extension, normalized to zero bytes",
+        "start": "0x7D2104"
       }
     ],
-    "included": "All bytes from 0x000000 through 0x7DFFFF except the ranges listed below"
+    "included": "All bytes from 0x000000 through 0x7DFFFF except or normalized as listed below"
   },
-  "invariant_sha256_by_hwconfig_variant": {
-    "type12-length256": "7346221d7814c8ef4412ced5f3795891f077f89ba64cf61d087e01fc5344f62f",
-    "type12-length261-trailer-0000029840": "8b0d60148f6205bc76adb6429375b0353db175e85a6b1c384da9a7ac3460d921"
-  },
-  "hwconfig_variants": {
-    "type12-length256": {
-      "record_type": 12,
-      "payload_length": 256,
-      "extension_hex": "",
-      "before_identity_sha256": "0e1514680c4e25e5c431adae5d4cb98bac14746b6e8fc30eb346ec75249f7cc5",
-      "after_uoid_sha256": "98d0beba4c7328a7237bc1a18fdd5e3da64c9f009e3b1c253ea39167a6dabd97"
-    },
-    "type12-length261-trailer-0000029840": {
-      "record_type": 12,
-      "payload_length": 261,
-      "extension_hex": "0000029840",
-      "before_identity_sha256": "b0aa28d193004cfbefc4d339a44681bddbbcb57e1ff653c4697e43834352e149",
-      "after_uoid_sha256": "4ea5fb2a33d91a471aab8e923168b30ab4be5d05869e6095ba793e167b9199e0"
-    }
+  "normalized_invariant_sha256": "7346221d7814c8ef4412ced5f3795891f077f89ba64cf61d087e01fc5344f62f",
+  "hwconfig_record": {
+    "record_type": 12,
+    "known_payload_length": 256,
+    "minimum_payload_length": 256,
+    "maximum_record_end_exclusive": "0x7E0000",
+    "extension_handling": "Preserve exactly; report length and SHA-256; normalize payload length to 256 and extension bytes to zero for invariant comparison",
+    "normalized_before_identity_sha256": "0e1514680c4e25e5c431adae5d4cb98bac14746b6e8fc30eb346ec75249f7cc5",
+    "normalized_after_uoid_sha256": "98d0beba4c7328a7237bc1a18fdd5e3da64c9f009e3b1c253ea39167a6dabd97",
+    "observed_payloads": [
+      {
+        "payload_length": 256,
+        "extension_hex": ""
+      },
+      {
+        "payload_length": 261,
+        "extension_hex": "0000029840"
+      }
+    ]
   },
   "reference_images": [
     {
@@ -80,7 +90,7 @@
       "state": "stock system, exhausted config, 261-byte HWCONFIG record"
     }
   ],
-  "scope": "Exact CC2 stock-camera firmware family and two HWCONFIG shapes observed in three independent cameras",
+  "scope": "Exact CC2 stock-camera firmware family and known type-12 HWCONFIG prefix observed in three independent cameras; bounded opaque extensions are normalized",
   "segments": {
     "boot": {
       "end_exclusive": "0x040000",
