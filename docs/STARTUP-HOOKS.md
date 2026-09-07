@@ -60,7 +60,10 @@ It does not automatically reboot. This deliberate recovery hold lasts until
 manual intervention; do not mistake it for a successful camera boot.
 
 There is no migration or automatic overwrite of an existing different
-`system.sh` or managed hook. Exact files with mode `755` are idempotent.
+`system.sh` or the selected managed hook. Only those two paths are checked for
+expected contents by each installer. Unrelated regular hooks in `enabled/`
+remain in place and execute in filename order. Exact files with mode `755`
+are idempotent.
 If an older or custom script is present, stop, save and review it, then resolve
 it explicitly before installation. Do not blindly delete it or retry.
 
@@ -118,8 +121,10 @@ adb shell busybox devmem 0x0043b190 32
 
 Expected observations:
 
-1. The log reports `10-erase-fix.sh` before `90-adb.sh`, and contains
+1. The log reports `10-erase-fix.sh` and contains
    `erase fix active; master=0x1000; partition geometry=0x4000`.
+   If the optional ADB hook was installed, `10-erase-fix.sh` appears before
+   `90-adb.sh`.
 2. Config is mounted read/write from `/dev/mtdblock5` as JFFS2 at `/etc/conf.d`, and **all partition erase sizes
    still read `00004000`** in `/proc/mtd`. `ucamera` starts afterward.
 3. If its optional hook was installed, ADB comes back without `start-adb`. The camera feed and its identity still work.

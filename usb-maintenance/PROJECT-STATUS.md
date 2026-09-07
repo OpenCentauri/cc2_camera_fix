@@ -17,8 +17,9 @@
   optional `/etc/conf.d/system.sh` before mounting `/system`.
 - The guarded `install-adb-startup --backup BACKUP.zip` command requires online
   root ADB, stable reads and clean space. It installs/readbacks a shared runner
-  and separate ADB hook through ADB, refuses unknown existing scripts, and
-  requires a manual restart.
+  and separate ADB hook through ADB, refuses different contents at `system.sh`
+  or the selected `enabled/90-adb.sh` path, and requires a manual restart.
+  Unrelated regular enabled hooks remain and execute in filename order.
 - Added a separate nonpersistent `start-adb` command that starts `/bin/adbd`
   through the uploader's unquoted `rm` target, waits for root ADB, and exits
   without reading flash or installing a persistent file.

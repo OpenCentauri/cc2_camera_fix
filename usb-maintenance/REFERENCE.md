@@ -175,8 +175,10 @@ its space budget takes priority. See [startup hooks](../docs/STARTUP-HOOKS.md).
 The installer requires `ENABLE-ADB` (or explicit `--yes`), validates the backup
 and live camera, checks clean config space, stages/readbacks files in tmpfs,
 and installs the shared runner plus `enabled/90-adb.sh` through ADB. It verifies
-persistent bytes and permissions. Different existing managed scripts are
-refused. It does not use destructive HID file upload. Restart manually after
+persistent bytes and permissions. Different contents at `system.sh` or the
+selected `enabled/90-adb.sh` path are refused. Unrelated regular hooks in
+`enabled/` remain and execute in filename order. It does not use destructive HID
+file upload. Restart manually after
 successful installation.
 
 `start-adb` is a no-op when the selected ADB device is already online.
@@ -360,8 +362,9 @@ image is then the intended recovery path.
   change to the internal size made 4 KiB sector erases work, confirming the
   mismatch. Restore now validates and applies that temporary preparation; it
   is not a persistent kernel fix and resets on reboot.
-- Persistent ADB installation requires a backup and online ADB, refuses unknown
-  existing scripts and verifies installed contents. The temporary upload-command
+- Persistent ADB installation requires a backup and online ADB, refuses different
+  contents at `system.sh` or the selected `enabled/90-adb.sh` path, and verifies
+  installed contents. Unrelated regular enabled hooks remain and execute. The temporary upload-command
   route deliberately relies on a vendor command-injection bug. That temporary startup has now been
   hardware-verified, but the vendor handler's `sync` caveat remains.
 - CDC transport is identified but not implemented; HID is the bootloader's

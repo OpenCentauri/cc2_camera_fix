@@ -720,8 +720,10 @@ consecutive stable live reads and sufficient clean config space. Consent is
 
 It stages and reads back files in tmpfs, then installs the shared
 `/etc/conf.d/system.sh` runner and `enabled/90-adb.sh` through ADB filesystem
-operations. It verifies persistent bytes and permissions. Different existing
-managed scripts are refused, not overwritten. No HID upload transaction is used.
+operations. It verifies persistent bytes and permissions. Different contents at
+`system.sh` or the selected `enabled/90-adb.sh` path are refused, not overwritten.
+Unrelated regular hooks in `enabled/` remain and execute in filename order.
+No HID upload transaction is used.
 Restart manually after success. For offline ADB, first run `start-adb`, then
 `backup`. See [startup hooks](../docs/STARTUP-HOOKS.md).
 
