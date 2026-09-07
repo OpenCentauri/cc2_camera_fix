@@ -68,11 +68,11 @@ byte-for-byte with the newly generated clean-data image in this review.
 ## Regression and rejection tests
 
 - The observed type-12 HWCONFIG records with 256-byte and 261-byte payloads are
-  accepted. Unknown extension bytes and a synthetic 262-byte payload are also
-  accepted after normalization and preserved exactly.
-- A payload shorter than the known 256-byte prefix, a payload extending beyond
-  HWCONFIG, and a non-type-12 record are rejected. Mutations after the declared
-  extension remain covered by invariant validation.
+  accepted. Unknown contents in the five-byte extension are normalized and
+  preserved exactly.
+- A payload shorter than the known 256-byte prefix, unobserved 257-, 262-, and
+  512-byte payloads, and a non-type-12 record are rejected. Mutations after the
+  declared extension remain covered by invariant validation.
 - A locally reconstructed full image with the third camera's invariant variant
   bytes passed strict analysis and recovery generation; the generated image
   retained HWCONFIG byte-for-byte. This is software validation, not a physical

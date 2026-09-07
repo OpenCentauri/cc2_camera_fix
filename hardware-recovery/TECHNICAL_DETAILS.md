@@ -145,17 +145,17 @@ record length exactly includes the five added bytes. The camera's own
 type, a little-endian 16-bit payload length, and that many payload bytes.
 
 The meaning of the five-byte extension is unknown, so its value is not treated
-as a firmware invariant. The validator requires record type 12, requires at
-least the complete known 256-byte prefix, and requires the declared payload to
-end within the HWCONFIG partition. Any additional length-delimited bytes are
-treated as an opaque extension and reported by length and SHA-256. For
-comparison with the reference firmware, the payload length is normalized to
-256 and each extension byte to zero. Recovery preserves the complete input
-HWCONFIG partition byte-for-byte.
+as a firmware invariant. The validator requires record type 12 and one of the
+two physically observed payload lengths: 256 bytes with no extension, or 261
+bytes with a five-byte opaque extension. The extension is reported by length
+and SHA-256. For comparison with the reference firmware, the 261-byte payload
+length is normalized to 256 and the five extension bytes to zero. Recovery
+preserves the complete input HWCONFIG partition byte-for-byte. Other payload
+lengths remain unsupported until physically observed.
 
 The validator therefore performs the strongest safe equivalent of “100% match apart from unit data”:
 
-1. Every firmware byte that should be invariant must match the exact fingerprints after normalizing the bounded HWCONFIG extension.
+1. Every firmware byte that should be invariant must match the exact fingerprints after normalizing the five-byte HWCONFIG extension, when present.
 2. The 32 KiB SquashFS window containing `bashrc.sh` must equal either the exact stock hash or the exact audited patched hash.
 3. These fields are excluded from or normalized for the invariant hash:
 
@@ -163,12 +163,12 @@ The validator therefore performs the strongest safe equivalent of “100% match 
 0x7D200B–0x7D200C  two-byte HWCONFIG unit check value
 0x7D2011–0x7D206E  94-byte HWCONFIG UOID
 0x7D2002–0x7D2003  normalized type-12 payload length
-0x7D2104–record end  opaque type-12 extension, when present
+0x7D2104–0x7D2108  opaque five-byte type-12 extension, when present
 0x7E0000–0x7FFFFF  writable JFFS2 config log
 ```
 
 4. The excluded fields are still validated:
-   - the type-12 length must cover the known prefix and remain inside HWCONFIG;
+   - the type-12 length must be one of the two physically observed lengths;
    - the extension length and SHA-256 are recorded;
    - the UOID must have the expected 94-byte structure;
    - `config` must contain CRC-valid JFFS2 nodes;
@@ -205,9 +205,10 @@ The builder:
 This is a mitigation for the deterministic per-boot write leak. It does not repair the underlying Ingenic SFC/JFFS2 erase-size defect. Other software that performs persistent writes could still consume config space.
 
 The tool supports only the exact firmware build and known type-12 HWCONFIG
-prefix represented by the embedded fingerprints. It accepts a bounded opaque
-extension, but a future Elegoo/Jovision build or a different record type or
-known-prefix layout must be analyzed and fingerprinted separately.
+prefix represented by the embedded fingerprints. It accepts arbitrary contents
+only for the observed five-byte extension. A future Elegoo/Jovision build,
+another payload length, or a different record type or known-prefix layout must
+be analyzed and fingerprinted separately.
 
 Three real unit identities were directly inspected, including one with the
 261-byte HWCONFIG record. Invariant firmware and the known HWCONFIG prefix must

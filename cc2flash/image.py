@@ -72,6 +72,7 @@ EXPECTED_USB_PARTITIONS = (
 HW_RECORD_START = 0x7D2000
 HW_RECORD_PAYLOAD_START = HW_RECORD_START + 4
 HW_KNOWN_PAYLOAD_END = HW_RECORD_PAYLOAD_START + 0x100
+HW_SUPPORTED_PAYLOAD_LENGTHS = (0x100, 0x105)
 HW_CHECK_START = 0x7D200B
 HW_CHECK_END = 0x7D200D
 HW_UOID_START = 0x7D2011
@@ -1217,6 +1218,14 @@ def identify_hwconfig_variant(image: bytes) -> tuple[str, dict[str, Any]]:
         raise ValidationError(
             "HWCONFIG type-12 payload is shorter than its known 256-byte "
             f"prefix (payload_length={record_length})"
+        )
+    if record_length not in HW_SUPPORTED_PAYLOAD_LENGTHS:
+        supported = ", ".join(
+            str(length) for length in HW_SUPPORTED_PAYLOAD_LENGTHS
+        )
+        raise ValidationError(
+            "HWCONFIG type-12 payload length is not one of the physically "
+            f"observed lengths {supported} (payload_length={record_length})"
         )
     record_end = HW_RECORD_PAYLOAD_START + record_length
     if record_end > CONFIG_START:

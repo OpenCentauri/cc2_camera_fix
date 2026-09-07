@@ -34,12 +34,12 @@ class HwconfigVariantTests(unittest.TestCase):
         self.assertEqual(name, "type12-length261")
         self.assertEqual(record["extension_length"], 5)
 
-    def test_unknown_extension_content_and_length_are_supported(self):
-        extension = bytes.fromhex("deadbeef0001")
+    def test_unknown_five_byte_extension_content_is_supported(self):
+        extension = bytes.fromhex("deadbeef01")
         name, record = tool.identify_hwconfig_variant(
-            hwconfig_record(0x106, extension)
+            hwconfig_record(0x105, extension)
         )
-        self.assertEqual(name, "type12-length262")
+        self.assertEqual(name, "type12-length261")
         self.assertEqual(record["extension_length"], len(extension))
         self.assertEqual(record["extension_sha256"], tool.sha256(extension))
 
@@ -47,7 +47,7 @@ class HwconfigVariantTests(unittest.TestCase):
         original = hwconfig_record(0x100)
         observed = hwconfig_record(0x105, bytes.fromhex("0000029840"))
         changed_trailer = hwconfig_record(0x105, bytes.fromhex("0000029841"))
-        extended = hwconfig_record(0x106, bytes.fromhex("deadbeef0001"))
+        extended = hwconfig_record(0x105, bytes.fromhex("deadbeef01"))
         _, original_record = tool.identify_hwconfig_variant(original)
         _, observed_record = tool.identify_hwconfig_variant(observed)
         _, changed_trailer_record = tool.identify_hwconfig_variant(changed_trailer)
@@ -73,10 +73,13 @@ class HwconfigVariantTests(unittest.TestCase):
                 hwconfig_record(0xFF)
             )
 
-    def test_record_extending_beyond_hwconfig_is_rejected(self):
-        length = tool.CONFIG_START - tool.HW_RECORD_PAYLOAD_START + 1
-        with self.assertRaisesRegex(tool.ValidationError, "beyond"):
-            tool.identify_hwconfig_variant(hwconfig_record(length))
+    def test_unobserved_payload_lengths_are_rejected(self):
+        for length in (0x101, 0x106, 0x200):
+            with self.subTest(length=length):
+                with self.assertRaisesRegex(
+                    tool.ValidationError, "physically observed"
+                ):
+                    tool.identify_hwconfig_variant(hwconfig_record(length))
 
     def test_non_type12_record_is_rejected(self):
         image = bytearray(hwconfig_record(0x100))

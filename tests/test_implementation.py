@@ -69,7 +69,7 @@ class ImplementationTests(unittest.TestCase):
 
     def test_serial_and_uoid_are_validated_independently(self):
         image = bytearray(b"\0" * tool.FLASH_SIZE)
-        extension = bytes.fromhex("deadbeef0001")
+        extension = bytes.fromhex("deadbeef01")
         record_length = 0x100 + len(extension)
         image[tool.HW_RECORD_START:tool.HW_RECORD_START + 2] = (12).to_bytes(
             2, "little"
@@ -161,7 +161,7 @@ class ImplementationTests(unittest.TestCase):
                 ],
                 extension,
             )
-            self.assertEqual(result["analysis"]["hwconfig_extension_length"], 6)
+            self.assertEqual(result["analysis"]["hwconfig_extension_length"], 5)
             self.assertEqual(
                 result["analysis"]["hwconfig_extension_sha256"],
                 tool.sha256(extension),
