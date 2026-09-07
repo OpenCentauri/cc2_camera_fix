@@ -6,10 +6,13 @@ it does not flash a firmware image or perform a raw partition erase. Keep a
 verified backup from this camera and a working recovery method before testing.
 Do not use it on a camera whose config is already exhausted.
 
-The early-boot erase fix is hardware-unverified. Offline tests cover admission
-checks and shell control flow; they do not establish reliable garbage collection
-or survival across power loss. Installation never tries to remount config while
-`ucamera` is running.
+The early-boot erase fix has physical validation on one supported camera:
+hook execution, config remount, repeated boots, an observed GC erase and a
+bounded automatic write/delete pressure test. See the
+[hardware findings](STARTUP-HOOKS-VALIDATION.md) for observations and limits.
+Offline tests additionally cover admission checks and shell failure paths;
+power-loss recovery is not established. Installation never tries to remount
+config while `ucamera` is running.
 
 ## Install from a checkout
 
@@ -69,7 +72,14 @@ that is broken. The budget accounts for uncompressed data, inode pages,
 namespace operations and block-tail slack. Current payloads require a 16-KiB
 budget, hence at least six clean marked blocks and 32 KiB available via statfs.
 This is deliberately conservative and may refuse a filesystem that could fit
-these files under favorable conditions. There is no force option.
+these files under favorable conditions. There is no force option. If admission
+fails for insufficient space, use the same-camera backup, image-building and
+restore workflow instead. A runtime `force-gc`/unmount workaround is not provided.
+
+The raw check measures already erased, marked blocks rather than assuming that
+JFFS2 can reclaim deleted data. `statfs` alone is insufficient: its available
+space accounting can include reclaimable dirty space. Neither measurement is
+a guarantee against an erase failure, power loss or a concurrent writer.
 
 Files are first pushed to verified tmpfs and read back byte-for-byte. Config is
 read again and must be unchanged, and available space is checked again before
@@ -121,10 +131,11 @@ is wrong, ADB fails to return, the camera identity/feed changes, or dmesg report
 new erase/CRC/I/O errors. Do not run `flash_eraseall`, format config, kill
 `ucamera` to force a remount, or repeatedly power-cycle a failing device.
 
-Successful boot and readback establish hook execution only. Reliable JFFS2
-cleanup still needs a separately backed-up, bounded write/delete experiment
-with recovery available, erase/readback evidence and repeated orderly boots.
-This draft does not automatically stress the small production config partition.
+Successful boot and readback alone establish hook execution, not garbage
+collection. The separate [physical validation](STARTUP-HOOKS-VALIDATION.md)
+records an observed erase, repeated boots and a bounded automatic GC pressure
+test. Users do not need to repeat that stress test as routine installation
+verification; the install commands do not stress the config partition.
 
 ## Recovery and compatibility
 
@@ -173,8 +184,9 @@ nodes can cross 4-KiB boundaries. The error-propagation defect is not repaired.
 
 [Repository hardware records](../usb-maintenance/SFC-RESTORE-PREPARATION.md) report successful erase/readback after this RAM
 field correction and return of failure after reboot. Those are prior reported
-observations, not tests performed for this draft. The new synchronous runner,
-early remount, recovery hold and sustained JFFS2 GC remain hardware-unverified.
+observations. The [startup-hook hardware findings](STARTUP-HOOKS-VALIDATION.md)
+record physical runner execution, early remount and GC testing. The deliberate
+recovery hold remains covered by offline tests, without physical fault injection.
 The extracted stock `rcS` invokes `system.sh` after mounting config but before
 `/home/bashrc.sh` launches `ucamera`; that establishes the proposed boot window.
 Failure to mount config or find the script before that point cannot be repaired

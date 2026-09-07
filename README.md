@@ -88,9 +88,11 @@ and writes that image through USB without requiring an SPI programmer.
 An experimental alternative installs [early-boot config hooks](docs/STARTUP-HOOKS.md)
 without flashing a firmware image. It requires online root ADB, a preserved
 backup and substantial clean config space. It writes config files and applies
-a RAM erase-size correction on each boot. This hook workflow has offline tests
-but still needs physical verification; it is not yet established as a reliable
-replacement for the recovery workflow below.
+a RAM erase-size correction on each boot. This hook workflow has
+[physical validation on one supported camera](docs/STARTUP-HOOKS-VALIDATION.md),
+including repeated boots and a bounded garbage-collection pressure test.
+If installation is refused for insufficient space, use the image-based
+workflow below.
 
 ### What you need
 
