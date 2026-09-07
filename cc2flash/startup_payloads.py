@@ -32,9 +32,9 @@ for hook in "$CC2_STAGE"/enabled/*; do
     /bin/sh "$hook"
     result=$?
     echo "cc2flash: ${hook##*/} exit $result"
-    # Never release rcS into camera startup with config missing.
-    if ! busybox awk '$2=="/etc/conf.d" && $3=="jffs2" {ok++} END {exit(ok!=1)}' /proc/mounts; then
-        echo 'cc2flash: CONFIG MISSING; boot held. Recover via ADB; do not write config.'
+    # Never release rcS into camera startup with config missing or unusable.
+    if ! busybox awk '$2=="/etc/conf.d" {n++; if($1!="/dev/mtdblock5" || $3!="jffs2" || $4 !~ /(^|,)rw(,|$)/)bad=1} END {exit(n!=1 || bad)}' /proc/mounts; then
+        echo 'cc2flash: CONFIG UNUSABLE; boot held. Recover via ADB; do not write config.'
         /bin/adbd &
         while :; do sleep 60; done
     fi
@@ -60,7 +60,7 @@ def erase_hook() -> bytes:
 # cc2flash erase hook v1; all diagnostics stay in RAM.
 fail() { echo "cc2flash: erase fix refused: $*"; exit 1; }
 word() { busybox devmem "$1" 32; }
-mounted() { busybox awk '$2=="/etc/conf.d" {if($1!="/dev/mtdblock5" || $3!="jffs2")exit 1; n++} END {if(n!=1)exit 1}' /proc/mounts; }
+mounted() { busybox awk '$2=="/etc/conf.d" {n++; if($1!="/dev/mtdblock5" || $3!="jffs2" || $4 !~ /(^|,)rw(,|$)/)bad=1} END {exit(n!=1 || bad)}' /proc/mounts; }
 [ -n "$CC2_STAGE" ] && [ "$PWD" = / ] || fail runner
 busybox pidof ucamera >/dev/null && fail ucamera-running
 mounted || fail config-mount

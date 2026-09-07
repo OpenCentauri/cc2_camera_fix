@@ -32,8 +32,8 @@ cc2flash backup OUTPUT.zip [--adb EXECUTABLE] [--serial SERIAL]
   stable live reads and sufficient clean config space. They perform config
   file writes, not firmware flashing; neither remounts config during installation.
   Unknown existing scripts are refused. Restart manually and follow
-  [startup hook verification](STARTUP-HOOKS.md); the erase hook is experimental
-  and hardware-unverified.
+  [startup hook verification](STARTUP-HOOKS.md); the erase hook has
+  [physical validation on one supported camera](STARTUP-HOOKS-VALIDATION.md).
 - `backup`: require three consecutive identical full reads within five
   attempts, then publish a new ZIP atomically. Never overwrites a backup.
   If ADB is offline, explicitly start it and rerun backup; backup itself is

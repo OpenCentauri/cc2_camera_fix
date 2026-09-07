@@ -147,13 +147,11 @@ def command_backup(args) -> int:
         image, manifest = acquire_stable(adb, progress=_read_progress)
     except AdbUnavailable as exc:
         temporary = " ".join(_common_command(args, "start-adb"))
-        persistent = " ".join(_common_command(args, "install-adb-startup"))
         raise ProtocolError(
             f"{exc}\n"
             "backup is strictly read-only and did not modify the camera.\n"
-            "Start ADB with one of these explicit commands, then rerun backup:\n"
-            f"  temporary for this boot: {temporary}\n"
-            f"  persistent after restart (requires an existing backup): {persistent} --backup <backup.zip>"
+            "Start ADB explicitly for this boot, then rerun backup:\n"
+            f"  {temporary}"
         ) from exc
 
     bootloader = manifest["bootloader"]
@@ -236,7 +234,7 @@ def command_install_startup(args) -> int:
     phrase = "ENABLE-ADB" if feature == "adb" else "INSTALL-ERASE-FIX"
     print(f"Install {feature} in /etc/conf.d/enabled and the shared system.sh runner.", file=sys.stderr)
     print("This writes config files. A same-camera backup and safe free space are required.", file=sys.stderr)
-    print("The erase fix is experimental and hardware-unverified; installation does not remount config.", file=sys.stderr)
+    print("The erase fix has physical validation on one supported camera; installation does not remount config.", file=sys.stderr)
     if not args.yes:
         if not sys.stdin.isatty():
             raise ProtocolError("hook installation requires interactive confirmation or explicit --yes")

@@ -641,8 +641,9 @@ The client exposes the two startup mechanisms as separate `start-adb` and
 `install-adb-startup` commands. `backup` does not enter either path. Without any
 setup, the stock gadget always exposes an ADB USB transport without a running
 daemon, so the pre-daemon host state is `Ucamera001 offline`, not an absent
-device. The startup commands classify both that exact offline state and a
-genuinely absent selected device as eligible. A missing local ADB executable,
+device. Only temporary `start-adb` accepts that offline state or an absent selected
+ADB device as a reason to attempt HID startup. Persistent `install-adb-startup`
+requires already-online root ADB and a preserved backup. A missing local ADB executable,
 timeout, multiple or unauthorized devices, a non-root shell, malformed
 partition map, failed/short read, or unstable acquisition remains a refusal.
 
@@ -712,22 +713,17 @@ uploader state.
 
 ### 9.2 Persistent startup hook
 
-`cc2flash install-adb-startup` warns that it will overwrite an existing file,
-then requires either the interactive phrase `ENABLE-ADB` or its explicit
-noninteractive `--yes` option. It sends this normal-HID sequence:
+The supported command is `cc2flash install-adb-startup --backup BACKUP.zip`.
+It requires already-online root ADB, a preserved same-camera backup, three
+consecutive stable live reads and sufficient clean config space. Consent is
+`ENABLE-ADB` or explicit `--yes`.
 
-| Step | Command | Frame details | Effect |
-|---:|---:|---|---|
-| 1 | `0x3000` | type `1`, empty payload | allocate/reset upload state |
-| 2 | `0x3110` | type `1`, payload `/etc/conf.d/system.sh` | select persistent destination |
-| 3 | `0x3200` | type `2`, sequence `0`, payload `/bin/adbd &` | send the one final 11-byte packet |
-| 4 | `0x3300` | type `1`, empty payload | remove/recreate target and chmod `0777` |
-
-After four status-zero replies, `install-adb-startup` exits with status `3`. It
-explicitly reports that no flash was read and no host backup file was created.
-The user must manually restart or power-cycle the camera and run `backup`. That
-command requires a root identity, validates all six MTD names and sizes, and
-requires three consecutive identical complete reads within five attempts.
+It stages and reads back files in tmpfs, then installs the shared
+`/etc/conf.d/system.sh` runner and `enabled/90-adb.sh` through ADB filesystem
+operations. It verifies persistent bytes and permissions. Different existing
+managed scripts are refused, not overwritten. No HID upload transaction is used.
+Restart manually after success. For offline ADB, first run `start-adb`, then
+`backup`. See [startup hooks](../docs/STARTUP-HOOKS.md).
 
 ### 9.3 Stable-read and boot-hash gates
 
@@ -760,28 +756,16 @@ then runs as a separate phase with the normal per-command timeouts. This avoids
 misrepresenting a short ADB-availability window as a bound on as many as thirty
 partition pulls.
 
-The persistent startup hook is a solderless recovery path, but it is
-intentionally **not read-only**:
-
-- `0x3300` removes any previous `/etc/conf.d/system.sh`, so the old file cannot
-  be preserved through this protocol;
-- normal HID provides no file download or content verification;
-- the success response establishes only that the daemon-side write path returned
-  success; and
-- the client-generated four-command persistent transaction has offline tests
-  but no physical USB capture in this work.
-
-The later root ADB partition reads provide flash readback, but they do not recover
-the previous contents of `system.sh` after it has been overwritten. Direct SPI
-or UART remains the independent route when preserving existing config is
-required before any mutation.
+Persistent hook installation writes config files and requires its backup before
+mutation. Normal HID offers no file download/readback; it is used only by the
+separate temporary ADB-start mechanism described above, not the hook installer.
 
 ## 10. Client compatibility status
 
 | Component | Current client behavior | Firmware behavior | Status |
 |---|---|---|---|
 | Bootloader data ACK | parses `u32le(next_expected_packet)` and requires the next in-order value; aborts on retry request | payload is the next expected packet, including a batch restart after an error | In-order 2,742-packet physical transfer passed; retransmission remains unimplemented and untested |
-| Persistent ADB start | separate guarded command installs `/etc/conf.d/system.sh`; backup remains read-only | `rcS` executes the persistent hook next boot | Implemented and offline-tested; manual hook behavior runtime-verified |
+| Persistent ADB start | guarded ADB command installs shared runner and ADB hook after backup and space checks | `rcS` executes the persistent hook next boot | Offline-tested; shared runner and persistent ADB physically verified on one camera |
 | Temporary ADB start | separate command sends an immutable no-space upload target, tolerates only final-commit failure/disconnect, and polls across the old transport closing | unquoted `rm` target starts `/bin/adbd`; literal `fopen` then fails | Physical startup and root shell verified on Windows |
 | Backup acceptance | requires three consecutive identical full reads within five attempts, gates on the known or explicitly accepted boot hash, and publishes one verified ZIP | ADB sync/`pull` can read each raw MTD device | Complete 8 MiB live acquisition verified; strengthened read/archive policy is offline-tested |
 | Public Python catalog | exposes all 57 exact normal commands, every `0x4xxx` match, and boot types 1/2/3/5 with builders/decoders | complete analyzed dispatcher/state-machine surface | Implemented with source comments and exhaustive offline mapping tests |

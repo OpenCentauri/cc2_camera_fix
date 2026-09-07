@@ -918,7 +918,7 @@ class CliAdbWorkflowTests(unittest.TestCase):
         error = stderr.getvalue()
         self.assertIn("strictly read-only", error)
         self.assertIn("cc2flash start-adb", error)
-        self.assertIn("cc2flash install-adb-startup", error)
+        self.assertNotIn("cc2flash install-adb-startup", error)
 
     def test_plan_restore_can_prove_preserved_backup_compatibility(self):
         image = b"replacement image"

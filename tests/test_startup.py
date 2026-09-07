@@ -170,6 +170,46 @@ class InstallerTests(unittest.TestCase):
 
 
 class PayloadTests(unittest.TestCase):
+    def test_real_mount_guards(self):
+        import re
+        good = '/dev/mtdblock5 /etc/conf.d jffs2 rw,relatime 0 0\n'
+        cases = [(good, True), (good.replace('rw,relatime', 'relatime,rw'), True),
+                 (good.replace('rw,', 'ro,'), False),
+                 (good.replace('mtdblock5', 'mtdblock4'), False),
+                 (good.replace('jffs2', 'tmpfs'), False), ('', False),
+                 (good * 2, False),
+                 (good + good.replace('mtdblock5', 'mtdblock4'), False),
+                 (good.replace('rw,', 'notrw,'), False)]
+        for payload in (payloads.RUNNER, payloads.erase_hook()):
+            programs = re.findall(r"busybox awk '([^']+)' /proc/mounts", payload.decode())
+            guard = next(p for p in programs if 'n!=1 || bad' in p)
+            for mounts, accepted in cases:
+                with self.subTest(mounts=mounts, payload=payload[:40]):
+                    result = subprocess.run(['awk', guard], input=mounts, text=True,
+                                            capture_output=True, timeout=5)
+                    self.assertEqual(result.returncode == 0, accepted, result.stderr)
+
+    def test_runner_holds_before_next_hook_on_bad_mount(self):
+        for mount in ('/dev/mtdblock5 /etc/conf.d jffs2 ro 0 0',
+                      '/dev/mtdblock4 /etc/conf.d jffs2 rw 0 0', ''):
+            with self.subTest(mount=mount), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / 'enabled').mkdir()
+                (root / 'enabled/10-first').write_bytes(b'exit 0\n')
+                (root / 'enabled/90-next').write_bytes(b'echo SHOULD_NOT_RUN\n')
+                (root / 'mounts').write_bytes((mount + '\n').encode())
+                worker = payloads.RUNNER.decode().split('CC2_STAGE=$2', 1)[1]
+                worker = worker.replace('/proc/mounts', '"$CC2_STAGE/mounts"')
+                worker = worker.replace('/bin/adbd &', 'echo RECOVERY_ADB')
+                # Bound the infinite hold; keep the real guard and dispatch logic.
+                worker = worker.replace('sleep 60', 'exit 73')
+                result = subprocess.run(['sh', '-c', 'busybox() { "$@"; }\n' + worker],
+                    env=dict(os.environ, CC2_STAGE=root.resolve().as_posix()),
+                    text=True, capture_output=True, timeout=5)
+                self.assertEqual(result.returncode, 73, result.stdout + result.stderr)
+                self.assertIn('RECOVERY_ADB', result.stdout)
+                self.assertNotIn('SHOULD_NOT_RUN', result.stdout)
+
     def test_shell_syntax(self):
         for content in (payloads.RUNNER,payloads.ADB_HOOK,payloads.erase_hook()):
             r=subprocess.run(['sh','-n'],input=content,capture_output=True,timeout=5)

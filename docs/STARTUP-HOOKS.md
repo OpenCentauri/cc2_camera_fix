@@ -23,11 +23,20 @@ camera. Obtain temporary ADB and preserve its backup first:
 ```sh
 python -m cc2flash start-adb
 python -m cc2flash backup before-hooks.zip
-python -m cc2flash install-adb-startup --backup before-hooks.zip
 python -m cc2flash install-erase-fix --backup before-hooks.zip
 ```
 
-The confirmations are `ENABLE-ADB` and `INSTALL-ERASE-FIX`, respectively.
+Optional persistent ADB can be installed afterward, while ADB is online:
+
+```sh
+python -m cc2flash install-adb-startup --backup before-hooks.zip
+```
+
+Install the erase fix first so optional ADB does not consume its required space.
+Persistent ADB is not required for the erase fix.
+
+The confirmations are `INSTALL-ERASE-FIX` for the erase fix and `ENABLE-ADB`
+for optional persistent ADB.
 `--yes` explicitly supplies that consent for scripted local verification.
 Both install commands accept `--adb` and `--serial`. They require already-online
 ADB; neither silently starts it through HID. Keep the original backup unchanged.
@@ -45,7 +54,7 @@ Scripts execute synchronously with `/bin/sh`, before stock startup launches
 `ucamera`. They must be regular files; symlinks and subdirectories in `enabled`
 are refused by the runner. Hook stdout/stderr goes to `/tmp/cc2-hooks.log`.
 A hook failure is logged and subsequent hooks can run if config is mounted.
-If config cannot be mounted again, the runner starts ADB for recovery and holds
+If config is missing, read-only, or mounted from an unexpected device, the runner starts ADB for recovery and holds
 startup rather than allowing the camera to run against an empty mountpoint.
 It does not automatically reboot. This deliberate recovery hold lasts until
 manual intervention; do not mistake it for a successful camera boot.
@@ -95,7 +104,8 @@ No automatic cleanup writes config after an error.
 
 ## Verify on the camera
 
-After both commands report successful file readback, restart manually. Do not
+After the erase-fix command reports successful file readback, restart manually.
+If persistent ADB was not installed, run `cc2flash start-adb` again to reconnect. Do not
 run the erase hook yourself while the camera service is active.
 
 ```sh
@@ -110,9 +120,9 @@ Expected observations:
 
 1. The log reports `10-erase-fix.sh` before `90-adb.sh`, and contains
    `erase fix active; master=0x1000; partition geometry=0x4000`.
-2. Config is mounted as JFFS2 at `/etc/conf.d`, and **all partition erase sizes
+2. Config is mounted read/write from `/dev/mtdblock5` as JFFS2 at `/etc/conf.d`, and **all partition erase sizes
    still read `00004000`** in `/proc/mtd`. `ucamera` starts afterward.
-3. ADB comes back without `start-adb`. The camera feed and its identity still work.
+3. If its optional hook was installed, ADB comes back without `start-adb`. The camera feed and its identity still work.
 4. The final command returns a freshly read aligned pointer in
    `0x80450000..0x83fffd9c`. To independently read the master erase field,
    subtract `0x80000000` from that pointer and add `0x10`, then use
@@ -139,7 +149,7 @@ verification; the install commands do not stress the config partition.
 
 ## Recovery and compatibility
 
-If the runner holds startup because config is absent, use the recovery ADB
+If the runner holds startup because config is missing or unusable, use the recovery ADB
 connection to collect `/tmp/cc2-hooks.log`, `dmesg` and `/proc/mounts`. Do not
 write to the empty `/etc/conf.d` directory. Use the preserved backup and the
 repository's recovery procedure if ordinary mount recovery fails.
