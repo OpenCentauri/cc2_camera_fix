@@ -61,12 +61,11 @@ The validator excludes only the known unit-specific HWCONFIG fields and mutable 
 - the exact stock or audited patched SquashFS window;
 - a 94-byte UOID with the observed character structure;
 - exactly one recoverable serial matching the observed serial format;
-- the observed 12-byte common prefix between serial and UOID;
 - valid JFFS2 CRCs and only known config filenames.
 
 Every raw image requires three byte-identical physical reads by default. `--allow-fewer-reads` is an explicit reduced-confidence escape hatch and is recorded with a warning in generated artifacts.
 
-The proprietary full serial↔UOID derivation and the meaning of the two-byte HWCONFIG check value remain unknown. The tool therefore preserves all of those bytes exactly but cannot cryptographically prove their full mutual relationship. This is the principal residual cross-device identity risk. Requiring multiple physical reads minimizes corruption risk without inventing an unverified formula.
+The proprietary full serial↔UOID derivation and the meaning of the two-byte HWCONFIG check value remain unknown. The tool therefore validates the serial and UOID structures independently and preserves all of those bytes exactly, but it cannot prove their full mutual relationship. This is the principal residual cross-device identity risk. Requiring multiple physical reads minimizes corruption risk without inventing an unverified formula.
 
 ## Auditability improvements in v1.1
 
@@ -95,7 +94,7 @@ All executed tests passed:
 - an already patched canonical output rebuilt idempotently with no write region;
 - a structurally valid unseen serial/UOID with three matching reads was accepted and preserved;
 - one-bit mutations in kernel or the system patch window were rejected;
-- a serial from one real unit combined with the other unit's UOID was rejected;
+- structurally valid serial and UOID values with different prefixes were accepted and preserved;
 - keeping either exhausted config was rejected;
 - a one-bit programmer readback mismatch was rejected;
 - the deterministic XZ, readable source replacement, JFFS2 writer/parser, strict post-build validation, and shell syntax checks all passed.

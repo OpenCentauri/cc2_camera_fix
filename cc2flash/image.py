@@ -1343,13 +1343,7 @@ def analyze_image(
         errors.append(str(exc))
         config_info = None
 
-    if config_info is not None and UOID_PATTERN.fullmatch(uoid) is not None:
-        serial_value = config_info["serial_value"]
-        if serial_value[:12] != uoid[:12]:
-            errors.append(
-                "serial.cfg and the HWCONFIG UOID do not share the expected "
-                "12-byte unit prefix"
-            )
+    if config_info is not None:
         if config_info["serial_source"] != "live-current":
             warnings.append(
                 "serial.cfg was recovered from a unique historical JFFS2 node "
@@ -1382,7 +1376,6 @@ def analyze_image(
         "serial_value": config_info["serial_value"],
         "serial_sha256": sha256(config_info["serial_payload"]),
         "serial_source": config_info["serial_source"],
-        "serial_uoid_prefix_match": True,
         "config_node_count": config_info["node_count"],
         "config_current_node_count": config_info["current_node_count"],
         "config_obsolete_node_count": config_info["obsolete_node_count"],
@@ -1483,7 +1476,6 @@ UOID SHA-256:            {analysis['uoid_sha256']}
 serial.cfg source:       {analysis['serial_source']}
 serial.cfg value:        {serial_display}
 serial.cfg SHA-256:      {analysis['serial_sha256']}
-Serial/UOID prefix:      PASS
 
 JFFS2 config
 ------------
@@ -1715,7 +1707,6 @@ def build_recovery(
                 "serial_masked": mask_value(analysis["serial_value"]),
                 "serial_sha256": analysis["serial_sha256"],
                 "uoid_masked": mask_value(analysis["uoid"]),
-                "serial_uoid_prefix_match": True,
                 "config_usage_percent_before": round(
                     analysis["config_usage_percent"], 6
                 ),

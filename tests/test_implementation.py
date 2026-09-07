@@ -4,6 +4,9 @@ import lzma
 from pathlib import Path
 import unittest
 from contextlib import redirect_stdout
+from unittest import mock
+
+from cc2flash import image as tool
 from cc2flash.image import (
     ORIGINAL_COPY_BLOCK, PATCHED_COPY_BLOCK_VISIBLE, ValidationError,
     build_squashfs_xz_fragment, serial_payload_is_valid, build_minimal_config,
@@ -62,3 +65,46 @@ class ImplementationTests(unittest.TestCase):
         with redirect_stdout(io.StringIO()):
             implementation_checks()
 
+    def test_serial_and_uoid_are_validated_independently(self):
+        image = bytearray(b"\0" * tool.FLASH_SIZE)
+        uoid = b"12PSSSS4DIFF" + b"A" * 82
+        image[tool.HW_UOID_START:tool.HW_UOID_END] = uoid
+        image[tool.HW_CHECK_START:tool.HW_CHECK_END] = b"\x01\x02"
+
+        serial_payload = (
+            b"serial=12PSSSS4TEST000000000000000000000000\n"
+        )
+        serial_value = serial_payload.removeprefix(b"serial=").removesuffix(b"\n")
+        self.assertNotEqual(serial_value[:12], uoid[:12])
+        image[tool.CONFIG_START:tool.CONFIG_END] = tool.build_minimal_config(
+            serial_payload
+        )
+        image = bytes(image)
+
+        variant = {
+            "before_identity_sha256": tool.sha256(
+                image[0x7D0000:tool.HW_CHECK_START]
+            ),
+            "after_uoid_sha256": tool.sha256(
+                image[tool.HW_UOID_END:tool.CONFIG_START]
+            ),
+            "invariant_sha256": tool.sha256(tool.invariant_bytes(image)),
+        }
+
+        with (
+            mock.patch.object(tool, "REFERENCE_SEGMENTS", {}),
+            mock.patch.object(
+                tool,
+                "ORIGINAL_PATCH_SHA256",
+                tool.sha256(image[tool.PATCH_START:tool.PATCH_END]),
+            ),
+            mock.patch.object(
+                tool,
+                "identify_hwconfig_variant",
+                return_value=("synthetic", variant),
+            ),
+        ):
+            analysis = tool.analyze_image(image)
+
+        self.assertEqual(analysis["serial_payload"], serial_payload)
+        self.assertEqual(analysis["uoid"], uoid)

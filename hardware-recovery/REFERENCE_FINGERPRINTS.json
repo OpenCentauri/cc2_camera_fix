@@ -9,7 +9,7 @@
     "raw_hash_is_not_invariant": true,
     "size": 131072,
     "start": "0x7E0000",
-    "validation": "JFFS2 structure/CRCs, known names, unambiguous serial, serial/UOID prefix"
+    "validation": "JFFS2 structure/CRCs, known names, unambiguous serial"
   },
   "format_version": 3,
   "full_size": 8388608,

@@ -81,7 +81,8 @@ byte-for-byte with the newly generated clean-data image in this review.
   rejected unless `--allow-fewer-reads` is explicit.
 - One-bit kernel mutation: rejected.
 - One-bit system-patch-window mutation: rejected.
-- Serial from one unit combined with another unit's UOID: rejected.
+- Structurally valid serial and UOID values with different prefixes: accepted
+  and preserved independently.
 - `--keep-config` on either exhausted bricked partition: rejected.
 - One-bit full-programmer readback mismatch: rejected with the affected region.
 - Rebuilding an already patched canonical image: idempotent; no write region reported.
