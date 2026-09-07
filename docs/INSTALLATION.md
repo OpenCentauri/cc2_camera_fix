@@ -1,7 +1,5 @@
 # Install cc2camera
 
-For an existing installation, see the [migration guide](MIGRATION_GUIDE.md).
-
 ## Windows: standalone executable
 
 1. Open the [GitHub Releases page](https://github.com/phryneas/cc2_camera_fix/releases).
