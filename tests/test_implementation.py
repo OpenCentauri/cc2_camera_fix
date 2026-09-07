@@ -2,6 +2,7 @@
 import io
 import lzma
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from contextlib import redirect_stdout
 from unittest import mock
@@ -91,20 +92,46 @@ class ImplementationTests(unittest.TestCase):
             "invariant_sha256": tool.sha256(tool.invariant_bytes(image)),
         }
 
-        with (
-            mock.patch.object(tool, "REFERENCE_SEGMENTS", {}),
-            mock.patch.object(
-                tool,
-                "ORIGINAL_PATCH_SHA256",
-                tool.sha256(image[tool.PATCH_START:tool.PATCH_END]),
-            ),
-            mock.patch.object(
-                tool,
-                "identify_hwconfig_variant",
-                return_value=("synthetic", variant),
-            ),
-        ):
-            analysis = tool.analyze_image(image)
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            primary = root / "primary.bin"
+            confirmation_one = root / "confirmation-one.bin"
+            confirmation_two = root / "confirmation-two.bin"
+            for path in (primary, confirmation_one, confirmation_two):
+                path.write_bytes(image)
 
-        self.assertEqual(analysis["serial_payload"], serial_payload)
-        self.assertEqual(analysis["uoid"], uoid)
+            output = root / "recovery"
+            with (
+                mock.patch.object(tool, "REFERENCE_SEGMENTS", {}),
+                mock.patch.object(
+                    tool,
+                    "PATCHED_PATCH_SHA256",
+                    tool.sha256(image[tool.PATCH_START:tool.PATCH_END]),
+                ),
+                mock.patch.object(
+                    tool,
+                    "identify_hwconfig_variant",
+                    return_value=("synthetic", variant),
+                ),
+            ):
+                tool.build_recovery(
+                    primary,
+                    output,
+                    confirmation_paths=(confirmation_one, confirmation_two),
+                    config_mode="serial-only",
+                    wipe_unknown_config=False,
+                    show_serial=False,
+                    allow_fewer_reads=False,
+                )
+
+            recovery = (output / "cc2-camera-recovery.bin").read_bytes()
+            self.assertEqual(
+                recovery[0x7D0000:tool.CONFIG_START],
+                image[0x7D0000:tool.CONFIG_START],
+            )
+            self.assertEqual(recovery[tool.HW_UOID_START:tool.HW_UOID_END], uoid)
+            self.assertEqual((output / "serial.cfg").read_bytes(), serial_payload)
+            rebuilt = tool.extract_serial_and_config_info(
+                recovery[tool.CONFIG_START:tool.CONFIG_END]
+            )
+            self.assertEqual(rebuilt["serial_payload"], serial_payload)
