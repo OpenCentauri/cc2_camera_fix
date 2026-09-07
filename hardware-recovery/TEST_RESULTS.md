@@ -13,8 +13,7 @@ Review date: 2026-09-04
   before the flash image reaches the firmware validator.
 - A manifest/image hash mismatch and any extra ZIP member are rejected.
 - The validated manifest contributes exactly three evidenced physical reads,
-  satisfying the ordinary non-reference build gate without
-  `--allow-fewer-reads`.
+  satisfying the build gate for every image without `--allow-fewer-reads`.
 - The hardware-recovery self-test and all nine focused
   interoperability/config-mode tests pass on Python 3.12.
 - Oversized zero-filled fragments are rejected before allocation. Zlib
@@ -78,7 +77,8 @@ byte-for-byte with the newly generated clean-data image in this review.
   flash or boot test of that camera.
 - Two distinct real serial/UOID pairs: accepted and preserved.
 - Structurally valid synthetic third unit with two confirmation reads (three total): accepted and preserved.
-- Non-reference unit with only one read: rejected unless `--allow-fewer-reads` is explicit.
+- A raw image carrying legacy exact-reference metadata with only one read:
+  rejected unless `--allow-fewer-reads` is explicit.
 - One-bit kernel mutation: rejected.
 - One-bit system-patch-window mutation: rejected.
 - Serial from one unit combined with another unit's UOID: rejected.
