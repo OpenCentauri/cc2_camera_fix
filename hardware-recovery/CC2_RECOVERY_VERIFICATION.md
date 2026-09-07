@@ -64,7 +64,7 @@ The validator excludes only the known unit-specific HWCONFIG fields and mutable 
 - the observed 12-byte common prefix between serial and UOID;
 - valid JFFS2 CRCs and only known config filenames.
 
-For an unseen full-ROM hash, v1.1 requires three byte-identical physical reads by default. `--allow-fewer-reads` is an explicit reduced-confidence escape hatch and is recorded with a warning in generated artifacts.
+Every raw image requires three byte-identical physical reads by default. `--allow-fewer-reads` is an explicit reduced-confidence escape hatch and is recorded with a warning in generated artifacts.
 
 The proprietary full serial↔UOID derivation and the meaning of the two-byte HWCONFIG check value remain unknown. The tool therefore preserves all of those bytes exactly but cannot cryptographically prove their full mutual relationship. This is the principal residual cross-device identity risk. Requiring multiple physical reads minimizes corruption risk without inventing an unverified formula.
 
@@ -82,7 +82,7 @@ An independent read-only SquashFS v4/XZ parser extracted `bashrc.sh` from the st
 Additional safety changes:
 
 - `--keep-config` refuses any exhausted or noncanonical partition;
-- non-reference devices require three matching reads by default;
+- every raw image requires three matching reads by default unless reduced confidence is explicitly accepted with `--allow-fewer-reads`;
 - readback verification first validates that the expected image is patched and canonical;
 - output overwrite cannot recursively delete inputs, subdirectories, symlink targets, or unrelated files;
 - generated Bus Pirate examples use documented `dev` and `spispeed` parameters and do not silently enable target power. See the [official flashrom Bus Pirate documentation](https://flashrom.org/supported_hw/supported_prog/buspirate.html).
