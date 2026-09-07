@@ -86,7 +86,7 @@ class CliTests(unittest.TestCase):
         with mock.patch.object(image, "read_image_source", return_value=(b"bad", {"image_member": None})), mock.patch.object(image, "analyze_image", side_effect=image.ValidationError("unsupported firmware")), redirect_stderr(io.StringIO()):
             self.assertEqual(cli.main(["build-image", "input", "--allow-fewer-reads"]), 2)
 
-    def test_read_opt_out_and_existing_output_preservation(self):
+    def test_every_raw_image_requires_read_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             output = root / "existing"
@@ -94,7 +94,9 @@ class CliTests(unittest.TestCase):
             sentinel = output / "unrelated.txt"
             sentinel.write_text("keep me")
             source = {"image_member": None, "evidenced_identical_reads": 1}
-            with mock.patch.object(image, "read_image_source", return_value=(b"image", source)), mock.patch.object(image, "analyze_image", return_value={"exact_reference": None}):
+            # A legacy whole-image reference marker must not relax the read gate.
+            analysis = {"exact_reference": "former-reference-dump"}
+            with mock.patch.object(image, "read_image_source", return_value=(b"image", source)), mock.patch.object(image, "analyze_image", return_value=analysis):
                 kwargs = dict(confirmation_paths=[], config_mode="serial-only",
                               wipe_unknown_config=False, show_serial=False)
                 with self.assertRaisesRegex(image.ValidationError, "higher risk"):

@@ -168,8 +168,7 @@ The validator therefore performs the strongest safe equivalent of “100% match 
      `--wipe-unknown-config` is explicit;
    - preserve-files accepts additional live names only when every entry can be
      safely reconstructed as a regular root file;
-   - exactly one unambiguous `serial.cfg` value must be recoverable;
-   - the serial and UOID must share the expected 12-byte unit prefix.
+   - exactly one unambiguous `serial.cfg` value must be recoverable.
 
 No other differences are accepted. See `REFERENCE_FINGERPRINTS.json`.
 
@@ -178,7 +177,7 @@ No other differences are accepted. See `REFERENCE_FINGERPRINTS.json`.
 The builder:
 
 - can require any additional physical reads supplied with `--confirm-read` to be byte-for-byte identical;
-- requires three identical reads for a non-reference unit unless reduced confidence is explicitly accepted;
+- requires three identical reads for every unit unless reduced confidence is explicitly accepted;
 - refuses files that are not exactly 8 MiB;
 - validates exact hashes for every invariant segment;
 - accepts only the exact known stock or known patched SquashFS window;
@@ -200,12 +199,12 @@ This is a mitigation for the deterministic per-boot write leak. It does not repa
 The tool supports only the exact firmware build and HWCONFIG shapes represented by the embedded fingerprints. A future Elegoo/Jovision build or another HWCONFIG record shape must be analyzed and fingerprinted separately.
 
 Three real unit identities were directly inspected, including one with the
-261-byte HWCONFIG record. Cross-serial support is fail-closed: invariant
-firmware must match the identified variant exactly; the UOID and serial must
-each match their observed structure and share the observed 12-byte prefix; all
-unit-specific HWCONFIG bytes and the recovered serial payload are preserved
+261-byte HWCONFIG record. Invariant firmware must match the identified variant
+exactly, while the UOID and serial must each match their observed structure.
+All unit-specific HWCONFIG bytes and the recovered serial payload are preserved
 exactly. Because the proprietary full serial↔UOID derivation is unknown, the
-tool cannot prove more than that relationship for a previously unseen unit.
+tool does not infer or enforce a relationship between those independently
+validated fields.
 
 Static analysis can prove that a bricked dump is transformed into the exact known recovery bytes and that all relevant filesystems/checksums validate. Actual boot recovery still requires a controlled flash, full readback verification, and an observed successful boot; software-only review cannot replace that hardware test.
 

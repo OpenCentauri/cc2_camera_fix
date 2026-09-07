@@ -1,9 +1,14 @@
 """Offline deterministic image-generation checks (no public CLI command)."""
 import io
+import json
 import lzma
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from contextlib import redirect_stdout
+from unittest import mock
+
+from cc2flash import image as tool
 from cc2flash.image import (
     ORIGINAL_COPY_BLOCK, PATCHED_COPY_BLOCK_VISIBLE, ValidationError,
     build_squashfs_xz_fragment, serial_payload_is_valid, build_minimal_config,
@@ -62,3 +67,84 @@ class ImplementationTests(unittest.TestCase):
         with redirect_stdout(io.StringIO()):
             implementation_checks()
 
+    def test_serial_and_uoid_are_validated_independently(self):
+        image = bytearray(b"\0" * tool.FLASH_SIZE)
+        uoid = b"12PSSSS4DIFF" + b"A" * 82
+        image[tool.HW_UOID_START:tool.HW_UOID_END] = uoid
+        image[tool.HW_CHECK_START:tool.HW_CHECK_END] = b"\x01\x02"
+
+        serial_payload = (
+            b"serial=12PSSSS4TEST000000000000000000000000\n"
+        )
+        serial_value = serial_payload.removeprefix(b"serial=").removesuffix(b"\n")
+        self.assertNotEqual(serial_value[:12], uoid[:12])
+        image[tool.CONFIG_START:tool.CONFIG_END] = tool.build_minimal_config(
+            serial_payload
+        )
+        image = bytes(image)
+
+        variant = {
+            "before_identity_sha256": tool.sha256(
+                image[0x7D0000:tool.HW_CHECK_START]
+            ),
+            "after_uoid_sha256": tool.sha256(
+                image[tool.HW_UOID_END:tool.CONFIG_START]
+            ),
+            "invariant_sha256": tool.sha256(tool.invariant_bytes(image)),
+        }
+
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            primary = root / "primary.bin"
+            confirmation_one = root / "confirmation-one.bin"
+            confirmation_two = root / "confirmation-two.bin"
+            for path in (primary, confirmation_one, confirmation_two):
+                path.write_bytes(image)
+
+            output = root / "recovery"
+            with (
+                mock.patch.object(tool, "REFERENCE_SEGMENTS", {}),
+                mock.patch.object(
+                    tool,
+                    "PATCHED_PATCH_SHA256",
+                    tool.sha256(image[tool.PATCH_START:tool.PATCH_END]),
+                ),
+                mock.patch.object(
+                    tool,
+                    "identify_hwconfig_variant",
+                    return_value=("synthetic", variant),
+                ),
+            ):
+                result = tool.build_recovery(
+                    primary,
+                    output,
+                    confirmation_paths=(confirmation_one, confirmation_two),
+                    config_mode="serial-only",
+                    wipe_unknown_config=False,
+                    show_serial=False,
+                    allow_fewer_reads=False,
+                )
+
+            recovery = (output / "cc2-camera-recovery.bin").read_bytes()
+            self.assertEqual(
+                recovery[0x7D0000:tool.CONFIG_START],
+                image[0x7D0000:tool.CONFIG_START],
+            )
+            self.assertEqual(recovery[tool.HW_UOID_START:tool.HW_UOID_END], uoid)
+            self.assertEqual((output / "serial.cfg").read_bytes(), serial_payload)
+            rebuilt = tool.extract_serial_and_config_info(
+                recovery[tool.CONFIG_START:tool.CONFIG_END]
+            )
+            self.assertEqual(rebuilt["serial_payload"], serial_payload)
+            self.assertNotIn("serial_uoid_prefix_match", result["analysis"])
+            self.assertNotIn("serial_uoid_prefix_match", result["output_analysis"])
+            self.assertNotIn(
+                "Serial/UOID prefix",
+                (output / "VALIDATION.txt").read_text(encoding="utf-8"),
+            )
+            generated_manifest = json.loads(
+                (output / "MANIFEST.json").read_text(encoding="utf-8")
+            )
+            self.assertNotIn(
+                "serial_uoid_prefix_match", generated_manifest["validation"]
+            )

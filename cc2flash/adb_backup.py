@@ -40,8 +40,8 @@ EXPECTED_PARTITIONS = (
     ("config", 0x020000),
 )
 
-# Keep these aligned with cc2flash/image.py.  Three matching
-# physical reads are the repository-wide minimum for a non-reference image.
+# Keep these aligned with cc2flash/image.py. Three matching physical reads are
+# the repository-wide minimum for every image.
 # USB acquisition gets two extra chances because live testing showed JFFS2 may
 # still change immediately after the one-shot ADB startup command.
 REQUIRED_IDENTICAL_READS = 3
