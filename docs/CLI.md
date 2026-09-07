@@ -57,11 +57,10 @@ For raw dumps, repeat `--confirm-read` for each independent matching read:
 cc2flash build-image camera-1.bin --confirm-read camera-2.bin --confirm-read camera-3.bin
 ```
 
-A valid ZIP supplies its own three-consecutive-read evidence. Non-reference raw
-inputs require three matching reads unless `--allow-fewer-reads` explicitly
-accepts the higher risk. This exception is recorded in the bundle and does not
-bypass firmware, identity, or mismatch checks. Exact full reference hashes can
-be rebuilt from one copy.
+A valid ZIP supplies its own three-consecutive-read evidence. Every raw input
+requires three matching reads unless `--allow-fewer-reads` explicitly accepts
+the higher risk. This exception is recorded in the bundle and does not bypass
+firmware, identity, or mismatch checks.
 
 | Config mode | Behavior |
 |---|---|

@@ -37,7 +37,7 @@ class BundleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = {"image_member": None, "evidenced_identical_reads": 3}
-            analysis = {"exact_reference": None, "system_state": "stock-unpatched"}
+            analysis = {"system_state": "stock-unpatched"}
             with mock.patch.object(image, "read_image_source", return_value=(b"image", source)), mock.patch.object(image, "analyze_image", return_value=analysis), mock.patch.object(image, "apply_system_patch", side_effect=OSError("build failed")), self.assertRaises(OSError):
                 image.build_recovery(root / "input.bin", root / "recovery", confirmation_paths=[], config_mode="serial-only", wipe_unknown_config=False, show_serial=False, allow_fewer_reads=False)
             self.assertEqual(list(root.iterdir()), [])

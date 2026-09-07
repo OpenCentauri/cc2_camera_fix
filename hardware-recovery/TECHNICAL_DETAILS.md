@@ -178,7 +178,7 @@ No other differences are accepted. See `REFERENCE_FINGERPRINTS.json`.
 The builder:
 
 - can require any additional physical reads supplied with `--confirm-read` to be byte-for-byte identical;
-- requires three identical reads for a non-reference unit unless reduced confidence is explicitly accepted;
+- requires three identical reads for every unit unless reduced confidence is explicitly accepted;
 - refuses files that are not exactly 8 MiB;
 - validates exact hashes for every invariant segment;
 - accepts only the exact known stock or known patched SquashFS window;

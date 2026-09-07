@@ -94,15 +94,6 @@ KNOWN_CONFIG_NAMES = {
 SERIAL_PATTERN = re.compile(rb"^serial=(12PSSSS4[A-Z0-9]{28})\n$")
 UOID_PATTERN = re.compile(rb"^12PSSSS4[A-Za-z0-9+/=]{86}$")
 
-REFERENCE_FULL_SHA256 = {
-    # The full hashes are informational: per-unit data and JFFS2 history mean
-    # most valid cameras will not equal a complete reference image.
-    "discord_bricked": "4325aebe84d70dd937de1790aa48f4b36ee2731def0ee5504ed080e4df13e819",
-    "discord_config_recovery": "a25d83ae5786fbc3306ba6f6403e9f174969e53ea3aeb6355e129463b3a5644a",
-    "second_camera_original": "ff9c8962abd06a14661db1857f6318b06f6378e93c4d812d96224094063bbcf9",
-    "second_camera_permanent_readback": "269f1b3b205e2ac30ada7cb98a7aeb9ada2e76786dc14abe95ea9c56dce73d1f",
-}
-
 # Exact byte ranges shared by every supported HWCONFIG variant.
 REFERENCE_SEGMENTS = {
     "boot": (0x000000, 0x040000, "5602ec961b4410ccceea0d4910e4fa768c6998bd4ba86143ba50855bdd0b7a54"),
@@ -1265,10 +1256,6 @@ def analyze_image(
         )
 
     full_hash = sha256(image)
-    exact_reference = next(
-        (name for name, digest in REFERENCE_FULL_SHA256.items() if digest == full_hash),
-        None,
-    )
 
     try:
         hwconfig_variant, variant = identify_hwconfig_variant(image)
@@ -1382,7 +1369,6 @@ def analyze_image(
         "source_name": source_name,
         "size": len(image),
         "sha256": full_hash,
-        "exact_reference": exact_reference,
         "invariant_sha256": actual_invariant_hash,
         "invariant_match": True,
         "hwconfig_variant": hwconfig_variant,
@@ -1455,8 +1441,6 @@ def format_analysis(analysis: dict[str, Any], show_serial: bool = False) -> str:
         if show_serial
         else mask_value(analysis["uoid"])
     )
-    exact = analysis["exact_reference"] or "none (normal for another unit/JFFS2 history)"
-
     segment_lines = []
     for name, result in analysis["segment_results"].items():
         segment_lines.append(
@@ -1479,7 +1463,6 @@ Input
 Name:                    {analysis['source_name']}
 Size:                    {analysis['size']} bytes
 SHA-256:                 {analysis['sha256']}
-Exact full reference:    {exact}
 
 Reference match
 ---------------
@@ -1560,13 +1543,11 @@ def build_recovery(
         1 + len(confirmed_reads),
         *(item["evidenced_identical_reads"] for item in confirmed_reads),
     )
-    insufficient_reads = (
-        total_reads < MIN_IDENTICAL_READS and analysis["exact_reference"] is None
-    )
+    insufficient_reads = total_reads < MIN_IDENTICAL_READS
     if insufficient_reads and not allow_fewer_reads:
         raise ValidationError(
-            f"This dump is not an exact known reference and only {total_reads} "
-            f"identical read(s) were supplied. Provide {MIN_IDENTICAL_READS} "
+            f"Only {total_reads} identical physical read(s) were supplied. "
+            f"Provide {MIN_IDENTICAL_READS} "
             "total physical reads with --confirm-read, or explicitly accept the "
             "higher risk with --allow-fewer-reads."
         )
@@ -1728,7 +1709,6 @@ def build_recovery(
                 "invariant_sha256": analysis["invariant_sha256"],
                 "invariant_match": True,
                 "hwconfig_variant": analysis["hwconfig_variant"],
-                "exact_full_reference": analysis["exact_reference"],
                 "system_state_before": analysis["system_state"],
                 "system_state_after": output_analysis["system_state"],
                 "serial_source": analysis["serial_source"],
@@ -1757,7 +1737,6 @@ def build_recovery(
             "changed_regions": changed_regions,
             "config_mode": config_mode,
             "wipe_unknown_config": wipe_unknown_config,
-            "reference_full_sha256": REFERENCE_FULL_SHA256,
         }
         write_text(
             output_dir / "MANIFEST.json",
@@ -1773,8 +1752,8 @@ def build_recovery(
             source_report += f"- {item['filename']}  {item['sha256']}\n"
         if insufficient_reads:
             source_report += (
-                "WARNING: fewer than three reads were supplied for a non-reference "
-                "image; the higher risk was explicitly accepted.\n"
+                "WARNING: fewer than three reads were supplied; the higher risk "
+                "was explicitly accepted.\n"
             )
         output_report = format_analysis(output_analysis, show_serial=show_serial)
         validation_text = (
@@ -1835,8 +1814,8 @@ def build_recovery(
             read_warning = """\
     READ-CONFIDENCE WARNING
     -----------------------
-    This non-reference image was built from fewer than three byte-identical
-    physical reads. Re-read the flash and rebuild before writing if at all possible.
+    This image was built from fewer than three byte-identical physical reads.
+    Re-read the flash and rebuild before writing if at all possible.
 
     """
 

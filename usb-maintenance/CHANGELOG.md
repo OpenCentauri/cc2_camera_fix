@@ -2,6 +2,9 @@
 
 ## Unreleased — physically validated USB restore
 
+- Removed whole-image reference hashes and their stable-read shortcut. Every raw
+  dump now requires three matching physical reads unless reduced confidence is
+  explicitly accepted with `--allow-fewer-reads`.
 - Documented the initial destructive trigger failure: the stock SFC erase path
   does not handle its configured 16 KiB size, so page-programming over an
   occupied JFFS2 cleanmarker produced the NOR bitwise-AND result instead of the
