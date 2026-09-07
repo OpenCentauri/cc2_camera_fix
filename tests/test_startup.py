@@ -1,6 +1,7 @@
 """Offline safety contracts for config hook installation and boot payloads."""
 from contextlib import ExitStack, redirect_stdout, redirect_stderr
 import io
+import os
 from pathlib import Path
 import struct
 import subprocess
@@ -150,8 +151,8 @@ class InstallerTests(unittest.TestCase):
             config = Path(directory)/'config'
             config.mkdir()
             (config/'enabled').symlink_to(Path(directory)/'absent')
-            result = subprocess.run(['sh', '-c', script.replace('/etc/conf.d', str(config))],
-                                    capture_output=True, timeout=5)
+            result = subprocess.run(['sh', '-c', script.replace('/etc/conf.d', 'config')],
+                                    cwd=directory, capture_output=True, timeout=5)
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual([p.name for p in config.iterdir()], ['enabled'])
             self.assertNotIn(b'CC2_OK', result.stdout)
@@ -208,8 +209,13 @@ busybox() {
 }
 sync() { :; }
 '''.replace('@HASH@',payloads.KERNEL_MD5)
-                (root/'mtd').write_text('\n'.join(f'mtd{i}: {s:08x} 00004000 "{n}"' for i,(n,s) in enumerate(payloads.EXPECTED_PARTITIONS))+'\n')
-                result=subprocess.run(['sh','-c',shim+script],cwd='/',env={'PATH':'/usr/bin:/bin','CC2_STAGE':directory,'SCENARIO':scenario},text=True,capture_output=True,timeout=10)
+                # Match procfs LF bytes even when the host defaults to CRLF.
+                (root/'mtd').write_bytes(('\n'.join(f'mtd{i}: {s:08x} 00004000 "{n}"' for i,(n,s) in enumerate(payloads.EXPECTED_PARTITIONS))+'\n').encode('ascii'))
+                # Let the shell resolve its own POSIX root (Git sh on Windows),
+                # retain the host environment, and pass a shell-readable path.
+                env = dict(os.environ, CC2_STAGE=root.resolve().as_posix(), SCENARIO=scenario)
+                result=subprocess.run(['sh','-c','cd / || exit 1\n'+shim+script],
+                                      cwd=directory, env=env, text=True, capture_output=True, timeout=10)
                 events=(root/'events').read_text().splitlines() if (root/'events').exists() else []
                 if scenario=='ok':
                     self.assertEqual(result.returncode,0,result.stdout+result.stderr)
