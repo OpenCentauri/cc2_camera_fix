@@ -1,5 +1,6 @@
 """Offline deterministic image-generation checks (no public CLI command)."""
 import io
+import json
 import lzma
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -114,7 +115,7 @@ class ImplementationTests(unittest.TestCase):
                     return_value=("synthetic", variant),
                 ),
             ):
-                tool.build_recovery(
+                result = tool.build_recovery(
                     primary,
                     output,
                     confirmation_paths=(confirmation_one, confirmation_two),
@@ -135,3 +136,15 @@ class ImplementationTests(unittest.TestCase):
                 recovery[tool.CONFIG_START:tool.CONFIG_END]
             )
             self.assertEqual(rebuilt["serial_payload"], serial_payload)
+            self.assertNotIn("serial_uoid_prefix_match", result["analysis"])
+            self.assertNotIn("serial_uoid_prefix_match", result["output_analysis"])
+            self.assertNotIn(
+                "Serial/UOID prefix",
+                (output / "VALIDATION.txt").read_text(encoding="utf-8"),
+            )
+            generated_manifest = json.loads(
+                (output / "MANIFEST.json").read_text(encoding="utf-8")
+            )
+            self.assertNotIn(
+                "serial_uoid_prefix_match", generated_manifest["validation"]
+            )
