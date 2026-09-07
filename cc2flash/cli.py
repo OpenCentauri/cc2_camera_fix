@@ -13,6 +13,7 @@ import time
 from . import __version__
 from . import image as image_tools
 from .display import invocation
+from .startup import install_startup
 from .restore_prepare import prepare_restore, validate_preparation_image
 from .adb_backup import (
     AdbClient,
@@ -26,11 +27,8 @@ from .adb_backup import (
     validate_replacement_against_backup,
 )
 from .hid_transport import (
-    ADB_STARTUP_CONTENT,
-    ADB_STARTUP_PATH,
     enter_bootloader,
     expected_devices,
-    install_adb_startup,
     restore_blob,
     start_adb_through_upload_command,
     wait_for_hid,
@@ -149,13 +147,11 @@ def command_backup(args) -> int:
         image, manifest = acquire_stable(adb, progress=_read_progress)
     except AdbUnavailable as exc:
         temporary = " ".join(_common_command(args, "start-adb"))
-        persistent = " ".join(_common_command(args, "install-adb-startup"))
         raise ProtocolError(
             f"{exc}\n"
             "backup is strictly read-only and did not modify the camera.\n"
-            "Start ADB with one of these explicit commands, then rerun backup:\n"
-            f"  temporary for this boot: {temporary}\n"
-            f"  persistent after restart: {persistent}"
+            "Start ADB explicitly for this boot, then rerun backup:\n"
+            f"  {temporary}"
         ) from exc
 
     bootloader = manifest["bootloader"]
@@ -232,42 +228,25 @@ def command_start_adb(args) -> int:
     return 0
 
 
-def command_install_adb_startup(args) -> int:
-    """Install the persistent startup hook as a separate explicit operation."""
-
-    adb = _adb(args)
-    try:
-        adb.ensure_available()
-    except AdbUnavailable as unavailable:
-        print(f"ADB is unavailable: {unavailable}", file=sys.stderr)
-    else:
-        identity, _parts = adb.identity_and_partitions()
-        print(f"ADB is online. Installing startup for future boots. Identity: {identity}")
-
-    print("Persistent ADB installation will modify the camera:", file=sys.stderr)
-    print(f"  overwrite {ADB_STARTUP_PATH}", file=sys.stderr)
-    print(
-        f"  with the exact {len(ADB_STARTUP_CONTENT)} bytes: "
-        f"{ADB_STARTUP_CONTENT.decode('ascii')}",
-        file=sys.stderr,
-    )
-    print("The startup hook takes effect on the next boot.", file=sys.stderr)
-
+def command_install_startup(args) -> int:
+    """Install a selected boot hook after explicit persistent-write consent."""
+    feature = args.functionality
+    phrase = "ENABLE-ADB" if feature == "adb" else "INSTALL-ERASE-FIX"
+    print(f"Install {feature} in /etc/conf.d/enabled and the shared system.sh runner.", file=sys.stderr)
+    print("This writes config files. A same-camera backup and safe free space are required.", file=sys.stderr)
+    print("The erase fix has physical validation on one supported camera; installation does not remount config.", file=sys.stderr)
     if not args.yes:
         if not sys.stdin.isatty():
-            raise ProtocolError(
-                "persistent ADB installation requires an interactive confirmation "
-                "or the explicit --yes option"
-            )
-        phrase = input("Type ENABLE-ADB to overwrite the startup hook: ")
-        if phrase != "ENABLE-ADB":
+            raise ProtocolError("hook installation requires interactive confirmation or explicit --yes")
+        if input(f"Type {phrase} to install: ") != phrase:
             raise ProtocolError("confirmation did not match; camera was not modified")
-
-    install_adb_startup()
-    print(f"Installed ADB startup hook: {ADB_STARTUP_PATH}")
-    print("No flash was read and no backup file was created.")
-    print("Restart or power-cycle the camera, wait for normal USB mode, then run:")
-    print("  " + " ".join(_common_command(args, "backup")) + " <output.zip>")
+    result = install_startup(_adb(args), Path(args.backup), functionality=feature, progress=_read_progress)
+    if result is None:
+        print("Exact hook and runner already present; no persistent write needed.")
+    else:
+        print(f"Installed and read back hook files; reserved write budget: {result.write_budget} bytes.")
+    print("Restart manually to verify the boot hook; inspect /tmp/cc2-hooks.log afterward.")
+    print("No firmware image was flashed. See docs/STARTUP-HOOKS.md for verification and stop conditions.")
     return 0
 
 
@@ -472,9 +451,14 @@ def parser() -> argparse.ArgumentParser:
     start = commands.add_parser("start-adb", parents=[common], help="start root ADB for this boot; no persistent file")
     start.add_argument("--timeout", type=_positive_finite_duration, default=30, help="ADB startup wait in seconds (default: 30)")
     start.set_defaults(func=command_start_adb)
-    install = commands.add_parser("install-adb-startup", parents=[common], help="overwrite the persistent ADB startup hook; restart required")
-    install.add_argument("--yes", action="store_true", help="consent to overwrite the startup hook without typing ENABLE-ADB")
-    install.set_defaults(func=command_install_adb_startup)
+    for name, feature, description in (
+        ("install-adb-startup", "adb", "install a persistent ADB hook; requires online ADB and safe config space"),
+        ("install-erase-fix", "erase-fix", "install experimental early-boot JFFS2 erase correction; no firmware flashing"),
+    ):
+        install = commands.add_parser(name, parents=[common], help=description)
+        install.add_argument("--backup", required=True, help="preserved same-camera backup ZIP")
+        install.add_argument("--yes", action="store_true", help="explicit consent to persistent config writes")
+        install.set_defaults(func=command_install_startup, functionality=feature)
 
     inspect = commands.add_parser("inspect-image", help="validate a raw dump or backup ZIP; offline, no output files")
     build = commands.add_parser("build-image", help="build a camera-specific recovery bundle; offline")

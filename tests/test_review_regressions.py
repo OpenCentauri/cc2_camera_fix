@@ -7,29 +7,8 @@ import unittest
 from unittest import mock
 
 from cc2flash import cli, image
-from cc2flash.adb_backup import AdbUnavailable
 from cc2flash.bundle import staged_directory
 from cc2flash.protocol import ProtocolError
-
-
-class StartupTests(unittest.TestCase):
-    def test_install_with_online_or_offline_adb(self):
-        for online in (True, False):
-            with self.subTest(online=online), mock.patch.object(cli, "_adb") as adb, mock.patch.object(cli, "install_adb_startup") as install, redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-                adb.return_value.identity_and_partitions.return_value = ("root", [])
-                if not online:
-                    adb.return_value.ensure_available.side_effect = AdbUnavailable("offline")
-                self.assertEqual(cli.main(["install-adb-startup", "--yes"]), 0)
-                install.assert_called_once_with()
-
-    def test_online_install_still_requires_consent_and_valid_device(self):
-        for invalid in (False, True):
-            with self.subTest(invalid=invalid), mock.patch.object(cli, "_adb") as adb, mock.patch.object(cli, "install_adb_startup") as install, mock.patch.object(cli.sys.stdin, "isatty", return_value=False), redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-                adb.return_value.identity_and_partitions.return_value = ("root", [])
-                if invalid:
-                    adb.return_value.identity_and_partitions.side_effect = ProtocolError("unsupported layout")
-                self.assertEqual(cli.main(["install-adb-startup"] + (["--yes"] if invalid else [])), 2)
-                install.assert_not_called()
 
 
 class BundleTests(unittest.TestCase):

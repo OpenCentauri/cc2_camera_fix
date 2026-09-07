@@ -15,9 +15,11 @@
 - Corrected the earlier ADB assumption: `adbd` exists but is not autostarted.
 - Confirmed that root `rcS` mounts JFFS2 at `/etc/conf.d` and executes an
   optional `/etc/conf.d/system.sh` before mounting `/system`.
-- Added a guarded `install-adb-startup` command that installs the
-  runtime-validated `/bin/adbd &` startup hook, stops, and requires a manual
-  restart.
+- The guarded `install-adb-startup --backup BACKUP.zip` command requires online
+  root ADB, stable reads and clean space. It installs/readbacks a shared runner
+  and separate ADB hook through ADB, refuses different contents at `system.sh`
+  or the selected `enabled/90-adb.sh` path, and requires a manual restart.
+  Unrelated regular enabled hooks remain and execute in filename order.
 - Added a separate nonpersistent `start-adb` command that starts `/bin/adbd`
   through the uploader's unquoted `rm` target, waits for root ADB, and exits
   without reading flash or installing a persistent file.
@@ -140,9 +142,10 @@ malformed-device states remain refusals.
   and then reaches the vendor's `sync` plus expected failing `fopen`. Normal
   firmware activity may still have pending JFFS2 writes, so this is not a claim
   that every flash byte remains unchanged during a live boot.
-- The device owner manually verified that `/etc/conf.d/system.sh` containing
-  `/bin/adbd &` starts ADB on the next boot. The client-generated HID transaction
-  for that persistent path remains hardware-unverified in this work.
+- The device owner physically verified the shared startup runner, persistent
+  ADB, erase correction and repeated boots on one supported camera.
+  [Hardware findings](../docs/STARTUP-HOOKS-VALIDATION.md) distinguish direct
+  erase observations from automatic-GC inference and record the test limits.
 - The temporary upload-command ADB start is derived from the reconstructed
   `hid_update` control flow. Its first physical-camera test successfully started
   `/bin/adbd` and allowed `adb shell`; the Windows host exposed a now-corrected

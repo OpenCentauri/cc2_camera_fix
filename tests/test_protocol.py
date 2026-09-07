@@ -688,7 +688,7 @@ class BackupTests(unittest.TestCase):
 
 
 class HidStateMachineTests(unittest.TestCase):
-    def test_adb_startup_upload_state_machine(self):
+    def test_normal_file_upload_state_machine(self):
         class FakeHandle:
             instance = None
 
@@ -712,16 +712,16 @@ class HidStateMachineTests(unittest.TestCase):
                 return normal_response(request.command)
 
         with mock.patch.object(hid_transport, "HidHandle", FakeHandle):
-            hid_transport.install_adb_startup()
+            hid_transport.upload_normal_file("/tmp/test", b"test")
 
         frames = [parse_normal_report(item) for item in FakeHandle.instance.writes]
         self.assertEqual([item.command for item in frames], [0x3000, 0x3110, 0x3200, 0x3300])
-        self.assertEqual(frames[1].payload, b"/etc/conf.d/system.sh")
-        self.assertEqual(frames[2].payload, b"/bin/adbd &")
+        self.assertEqual(frames[1].payload, b"/tmp/test")
+        self.assertEqual(frames[2].payload, b"test")
         self.assertEqual(frames[2].frame_type, 2)
         self.assertEqual(frames[2].status, 0)
 
-    def test_adb_startup_upload_rejects_device_error(self):
+    def test_normal_file_upload_rejects_device_error(self):
         replies = [normal_response(0x3000), normal_response(0x3110, status=1)]
 
         class FakeHandle:
@@ -742,7 +742,7 @@ class HidStateMachineTests(unittest.TestCase):
 
         with mock.patch.object(hid_transport, "HidHandle", FakeHandle):
             with self.assertRaisesRegex(ProtocolError, "status=1"):
-                hid_transport.install_adb_startup()
+                hid_transport.upload_normal_file("/tmp/test", b"test")
 
     def test_temporary_adb_upload_command_expects_commit_failure(self):
         replies = [
@@ -905,7 +905,7 @@ class CliAdbWorkflowTests(unittest.TestCase):
                 cli, "acquire_stable", side_effect=AdbUnavailable("device offline")
             ),
             mock.patch.object(cli, "start_adb_through_upload_command") as start,
-            mock.patch.object(cli, "install_adb_startup") as install,
+            mock.patch.object(cli, "install_startup") as install,
             mock.patch.object(cli, "save_backup") as save,
             redirect_stdout(io.StringIO()),
             redirect_stderr(stderr),
@@ -918,7 +918,7 @@ class CliAdbWorkflowTests(unittest.TestCase):
         error = stderr.getvalue()
         self.assertIn("strictly read-only", error)
         self.assertIn("cc2flash start-adb", error)
-        self.assertIn("cc2flash install-adb-startup", error)
+        self.assertNotIn("cc2flash install-adb-startup", error)
 
     def test_plan_restore_can_prove_preserved_backup_compatibility(self):
         image = b"replacement image"
@@ -1064,15 +1064,15 @@ class CliAdbWorkflowTests(unittest.TestCase):
         interactive_stdin = SimpleNamespace(isatty=lambda: True)
         with (
             mock.patch.object(cli, "_adb", return_value=fake_adb),
-            mock.patch.object(cli, "install_adb_startup") as install,
+            mock.patch.object(cli, "install_startup") as install,
             mock.patch.object(sys, "stdin", interactive_stdin),
             mock.patch("builtins.input", return_value="ENABLE-ADB"),
             redirect_stdout(io.StringIO()),
             redirect_stderr(io.StringIO()),
         ):
-            status = cli.main(["install-adb-startup"])
+            status = cli.main(["install-adb-startup", "--backup", "backup.zip"])
         self.assertEqual(status, 0)
-        install.assert_called_once_with()
+        install.assert_called_once_with(fake_adb, Path("backup.zip"), functionality="adb", progress=cli._read_progress)
 
     def test_install_confirmation_mismatch_does_not_write(self):
         fake_adb = mock.Mock()
@@ -1080,13 +1080,13 @@ class CliAdbWorkflowTests(unittest.TestCase):
         interactive_stdin = SimpleNamespace(isatty=lambda: True)
         with (
             mock.patch.object(cli, "_adb", return_value=fake_adb),
-            mock.patch.object(cli, "install_adb_startup") as install,
+            mock.patch.object(cli, "install_startup") as install,
             mock.patch.object(sys, "stdin", interactive_stdin),
             mock.patch("builtins.input", return_value="no"),
             redirect_stdout(io.StringIO()),
             redirect_stderr(io.StringIO()),
         ):
-            status = cli.main(["install-adb-startup"])
+            status = cli.main(["install-adb-startup", "--backup", "backup.zip"])
         self.assertEqual(status, 2)
         install.assert_not_called()
 
@@ -1095,12 +1095,12 @@ class CliAdbWorkflowTests(unittest.TestCase):
         fake_adb.ensure_available.side_effect = AdbUnavailable("device offline")
         with (
             mock.patch.object(cli, "_adb", return_value=fake_adb),
-            mock.patch.object(cli, "install_adb_startup") as install,
+            mock.patch.object(cli, "install_startup") as install,
             mock.patch.object(sys, "stdin", io.StringIO()),
             redirect_stdout(io.StringIO()),
             redirect_stderr(io.StringIO()),
         ):
-            status = cli.main(["install-adb-startup"])
+            status = cli.main(["install-adb-startup", "--backup", "backup.zip"])
         self.assertEqual(status, 2)
         install.assert_not_called()
 
@@ -1110,13 +1110,13 @@ class CliAdbWorkflowTests(unittest.TestCase):
         stdout = io.StringIO()
         with (
             mock.patch.object(cli, "_adb", return_value=fake_adb),
-            mock.patch.object(cli, "install_adb_startup") as install,
+            mock.patch.object(cli, "install_startup") as install,
             redirect_stdout(stdout),
             redirect_stderr(io.StringIO()),
         ):
-            status = cli.main(["install-adb-startup", "--yes"])
+            status = cli.main(["install-adb-startup", "--backup", "backup.zip", "--yes"])
         self.assertEqual(status, 0)
-        install.assert_called_once_with()
+        install.assert_called_once_with(fake_adb, Path("backup.zip"), functionality="adb", progress=cli._read_progress)
         self.assertIn("restart", stdout.getvalue().casefold())
 
     def test_install_when_adb_online_installs_for_future_boots(self):
@@ -1124,13 +1124,13 @@ class CliAdbWorkflowTests(unittest.TestCase):
         fake_adb.identity_and_partitions.return_value = ("root", [])
         with (
             mock.patch.object(cli, "_adb", return_value=fake_adb),
-            mock.patch.object(cli, "install_adb_startup") as install,
+            mock.patch.object(cli, "install_startup") as install,
             redirect_stdout(io.StringIO()),
             redirect_stderr(io.StringIO()),
         ):
-            status = cli.main(["install-adb-startup", "--yes"])
+            status = cli.main(["install-adb-startup", "--backup", "backup.zip", "--yes"])
         self.assertEqual(status, 0)
-        install.assert_called_once_with()
+        install.assert_called_once_with(fake_adb, Path("backup.zip"), functionality="adb", progress=cli._read_progress)
 
     def test_known_bootloader_is_accepted_after_stable_acquisition(self):
         image = b"image"

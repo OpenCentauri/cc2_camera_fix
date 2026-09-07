@@ -22,7 +22,8 @@ instead reads `/dev/mtd0` through `/dev/mtd5` over root ADB. It uses the
 legacy shell service for text checks and binary-safe `adb pull` for MTD bytes;
 the stock daemon does not support modern `adb exec-out`. `backup` is strictly
 read-only: if ADB is offline, run the separate `start-adb` command for a
-temporary start, or `install-adb-startup` to install the persistent
+temporary start. With ADB online and a backup preserved, use
+`install-adb-startup --backup BACKUP.zip` to install the persistent
 `/etc/conf.d/system.sh` hook and then restart.
 
 This code was recovered by static analysis and tested offline against the
@@ -160,32 +161,29 @@ handler nevertheless calls `sync`, and the running stock firmware may already
 have pending JFFS2 changes, so it is not a guarantee that unrelated live-system
 writes never reach flash. It specifically avoids the known `system.sh` change.
 
-For persistent startup, `install-adb-startup` prints the mutation and requires
-the literal confirmation `ENABLE-ADB`. It then sends:
-
-1. `0x3000` — initialize the upload state;
-2. `0x3110` — select `/etc/conf.d/system.sh`;
-3. `0x3200`, final frame — upload the exact 11 bytes `/bin/adbd &`; and
-4. `0x3300` — remove any old target, write the file, and chmod it `0777`.
-
-The command then exits successfully with status `0`. It has not read flash or created a
-backup. Restart or power-cycle the camera, wait for normal USB mode, and run
-`cc2flash backup backup.zip`; `rcS` will start `adbd` during boot.
-
-For a noninteractive invocation, the mutation must be requested explicitly:
+For optional persistent ADB, obtain online root ADB and preserve a backup first:
 
 ```sh
-cc2flash install-adb-startup --yes
+cc2flash start-adb
+cc2flash backup backup.zip
+cc2flash install-adb-startup --backup backup.zip
 ```
 
-This overwrites any existing `/etc/conf.d/system.sh`; the HID protocol cannot
-download or preserve the previous file. A missing local `adb` executable,
-multiple/unauthorized ADB devices, a non-root shell, or a wrong MTD map does not
-trigger either ADB-start command.
+If installing the erase fix too, install it before optional persistent ADB so
+its space budget takes priority. See [startup hooks](../docs/STARTUP-HOOKS.md).
+
+The installer requires `ENABLE-ADB` (or explicit `--yes`), validates the backup
+and live camera, checks clean config space, stages/readbacks files in tmpfs,
+and installs the shared runner plus `enabled/90-adb.sh` through ADB. It verifies
+persistent bytes and permissions. Different contents at `system.sh` or the
+selected `enabled/90-adb.sh` path are refused. Unrelated regular hooks in
+`enabled/` remain and execute in filename order. It does not use destructive HID
+file upload. Restart manually after
+successful installation.
 
 `start-adb` is a no-op when the selected ADB device is already online.
-`install-adb-startup` still installs the persistent hook for future boots.
-`backup` never invokes either command automatically.
+`backup` never invokes either command automatically. Offline ADB requires the
+temporary `start-adb` command, not the persistent installer.
 
 `backup` requires the exact recovered partition sequence and sizes:
 
@@ -364,9 +362,10 @@ image is then the intended recovery path.
   change to the internal size made 4 KiB sector erases work, confirming the
   mismatch. Restore now validates and applies that temporary preparation; it
   is not a persistent kernel fix and resets on reboot.
-- The explicit persistent ADB recovery overwrites a startup hook before the
-  first backup; the temporary upload-command route avoids that file but deliberately
-  relies on a vendor command-injection bug. That temporary startup has now been
+- Persistent ADB installation requires a backup and online ADB, refuses different
+  contents at `system.sh` or the selected `enabled/90-adb.sh` path, and verifies
+  installed contents. Unrelated regular enabled hooks remain and execute. The temporary upload-command
+  route deliberately relies on a vendor command-injection bug. That temporary startup has now been
   hardware-verified, but the vendor handler's `sync` caveat remains.
 - CDC transport is identified but not implemented; HID is the bootloader's
   default and the path used here.

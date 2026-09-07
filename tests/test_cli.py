@@ -16,7 +16,7 @@ class CliTests(unittest.TestCase):
         action = next(a for a in cli.parser()._actions if isinstance(a, argparse._SubParsersAction))
         self.assertEqual(set(action.choices), {
             "devices", "device-info", "start-adb", "install-adb-startup",
-            "backup", "inspect-image", "build-image", "restore",
+            "backup", "inspect-image", "build-image", "restore", "install-erase-fix",
         })
 
     def test_image_defaults_and_repeatable_reads(self):
