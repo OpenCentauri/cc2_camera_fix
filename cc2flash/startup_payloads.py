@@ -66,7 +66,7 @@ busybox pidof ucamera >/dev/null && fail ucamera-running
 mounted || fail config-mount
 # No other mounts of this filesystem or mounts beneath config.
 [ "$(busybox awk '$1=="/dev/mtdblock5" || $2 ~ /^\\/etc\\/conf.d\\// {n++} END {print n+0}' /proc/mounts)" = 1 ] || fail mount-topology
-[ "$(busybox sed '1d' /proc/mtd)" = '@MTD@' ] || fail partition-map
+[ "$(busybox sed '1d;y/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/' /proc/mtd)" = '@MTD@' ] || fail partition-map
 @SYMBOLS@
 @CHECKS@
 # Stock BusyBox MD5 is a build fingerprint, not cryptographic authentication.
@@ -95,7 +95,7 @@ fi
 busybox mount -t jffs2 /dev/mtdblock5 /etc/conf.d || fail remount
 trap - 0
 mounted || fail mount-readback
-[ "$(busybox sed '1d' /proc/mtd)" = '@MTD@' ] || fail geometry-changed
+[ "$(busybox sed '1d;y/ABCDEFGHIJKLMNOPQRSTUVWXYZ/abcdefghijklmnopqrstuvwxyz/' /proc/mtd)" = '@MTD@' ] || fail geometry-changed
 [ -s /etc/conf.d/serial.cfg ] || fail serial-missing
 echo 'cc2flash: erase fix active; master=0x1000; partition geometry=0x4000'
 '''.replace('@MTD@',mtd).replace('@SYMBOLS@',symbols).replace('@CHECKS@',checks).replace('@MD5@',KERNEL_MD5)).encode('ascii')

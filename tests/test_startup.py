@@ -178,7 +178,7 @@ class PayloadTests(unittest.TestCase):
     def test_unmount_failure_and_late_start_never_write_ram(self):
         # Replace read-only environment paths and BusyBox with a shell shim.
         # Hash output is mocked; this verifies the control flow.
-        for scenario in ('late','unmount-fail','ok','bad-pointer','bad-kernel','write-readback','bad-instruction','mount-fail','already-patched'):
+        for scenario in ('late','unmount-fail','ok','bad-pointer','bad-kernel','write-readback','bad-instruction','mount-fail','already-patched','bad-geometry','bad-name'):
             with self.subTest(scenario=scenario),tempfile.TemporaryDirectory() as directory:
                 root=Path(directory)
                 script=payloads.erase_hook().decode()
@@ -193,7 +193,7 @@ busybox() {
  awk) case "$*" in
  *kallsyms*) case "$*" in *recovery_norflash_erase*) echo 801f06cc;; *erase_sector*) echo 801efc74;; *direct_erase*) echo 801f080c;; esac;;
  *'n+0'*) echo 1;; esac; return 0;;
- sed) cat "$CC2_STAGE/mtd"; return;;
+ sed) sed "$2" "$CC2_STAGE/mtd"; return;;
  md5sum) if [ "$SCENARIO" = bad-kernel ]; then echo bad; else echo "@HASH@  /dev/mtd1"; fi; return;;
  devmem) case "$2" in
  0x1f06d4) if [ "$SCENARIO" = bad-instruction ]; then echo 0x00000000; else echo 0x3C138044; fi;; 0x1f06e0) echo 0x8E64B190;;
@@ -210,7 +210,11 @@ busybox() {
 sync() { :; }
 '''.replace('@HASH@',payloads.KERNEL_MD5)
                 # Match procfs LF bytes even when the host defaults to CRLF.
-                (root/'mtd').write_bytes(('\n'.join(f'mtd{i}: {s:08x} 00004000 "{n}"' for i,(n,s) in enumerate(payloads.EXPECTED_PARTITIONS))+'\n').encode('ascii'))
+                (root/'mtd').write_bytes(('dev:    size   erasesize  name\n'+'\n'.join(f'mtd{i}: {s:08x} 00004000 "{n.upper() if n == "hwconfig" else n}"' for i,(n,s) in enumerate(payloads.EXPECTED_PARTITIONS))+'\n').encode('ascii'))
+                if scenario == 'bad-geometry':
+                    (root/'mtd').write_bytes((root/'mtd').read_bytes().replace(b'00004000', b'00001000'))
+                if scenario == 'bad-name':
+                    (root/'mtd').write_bytes((root/'mtd').read_bytes().replace(b'HWCONFIG', b'OTHER'))
                 # Let the shell resolve its own POSIX root (Git sh on Windows),
                 # retain the host environment, and pass a shell-readable path.
                 env = dict(os.environ, CC2_STAGE=root.resolve().as_posix(), SCENARIO=scenario)
