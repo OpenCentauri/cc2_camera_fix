@@ -55,9 +55,12 @@ The result for both real units is deterministic and matches the previously docum
 
 Cross-serial support was directly verified on two real units and structurally tested on a third synthetic identity.
 
-The validator excludes only the known unit-specific HWCONFIG fields and mutable config log from invariant comparison. It still requires:
+The validator normalizes the observed five-byte opaque HWCONFIG extension and
+excludes the known unit-specific HWCONFIG fields and mutable config log from
+invariant comparison. It still requires:
 
-- exact firmware hashes everywhere else;
+- exact firmware and known HWCONFIG-prefix hashes everywhere else;
+- a type-12 payload with one of the physically observed lengths, 256 or 261;
 - the exact stock or audited patched SquashFS window;
 - a 94-byte UOID with the observed character structure;
 - exactly one recoverable serial matching the observed serial format;
@@ -65,7 +68,13 @@ The validator excludes only the known unit-specific HWCONFIG fields and mutable 
 
 Every raw image requires three byte-identical physical reads by default. `--allow-fewer-reads` is an explicit reduced-confidence escape hatch and is recorded with a warning in generated artifacts.
 
-The proprietary full serial↔UOID derivation and the meaning of the two-byte HWCONFIG check value remain unknown. The tool therefore validates the serial and UOID structures independently and preserves all of those bytes exactly, but it cannot prove their full mutual relationship. This is the principal residual cross-device identity risk. Requiring multiple physical reads minimizes corruption risk without inventing an unverified formula.
+The proprietary full serial↔UOID derivation and the meanings of the two-byte
+HWCONFIG check value and five-byte record extension remain unknown. The tool
+therefore validates the serial and UOID structures independently, records the
+extension length and hash, and preserves all of those bytes exactly. It cannot
+prove their full semantic relationship. This is the principal residual
+cross-device identity risk. Requiring multiple physical reads minimizes
+corruption risk without inventing an unverified formula.
 
 ## Auditability improvements in v1.1
 
@@ -95,6 +104,8 @@ All executed tests passed:
 - a structurally valid unseen serial/UOID with three matching reads was accepted and preserved;
 - one-bit mutations in kernel or the system patch window were rejected;
 - structurally valid serial and UOID values with different prefixes were accepted and preserved;
+- unknown contents in the observed five-byte type-12 extension were accepted
+  and preserved, while short and unobserved record lengths were rejected;
 - keeping either exhausted config was rejected;
 - a one-bit programmer readback mismatch was rejected;
 - the deterministic XZ, readable source replacement, JFFS2 writer/parser, strict post-build validation, and shell syntax checks all passed.
