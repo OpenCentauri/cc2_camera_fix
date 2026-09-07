@@ -1,4 +1,4 @@
-"""CC2 stock-camera flash maintenance support."""
+"""Maintenance tools for the Elegoo CC2 stock camera."""
 
 from . import commands as commands
 

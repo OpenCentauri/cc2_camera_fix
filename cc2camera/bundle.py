@@ -39,7 +39,7 @@ def staged_directory(destination: Path):
     if os.path.lexists(destination):
         raise FileExistsError(errno.EEXIST, "Output already exists", str(destination))
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=".cc2flash-build-", dir=destination.parent) as temporary:
+    with tempfile.TemporaryDirectory(prefix=".cc2camera-build-", dir=destination.parent) as temporary:
         staging = Path(temporary) / "bundle"
         staging.mkdir()
         yield staging

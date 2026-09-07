@@ -8,8 +8,8 @@ import unittest
 from contextlib import redirect_stdout
 from unittest import mock
 
-from cc2flash import image as tool
-from cc2flash.image import (
+from cc2camera import image as tool
+from cc2camera.image import (
     ORIGINAL_COPY_BLOCK, PATCHED_COPY_BLOCK_VISIBLE, ValidationError,
     build_squashfs_xz_fragment, serial_payload_is_valid, build_minimal_config,
     extract_serial_and_config_info, read_image_source, analyze_image,

@@ -25,20 +25,20 @@ jobs:
       - name: Run offline tests
         run: python -m unittest discover -s tests -v
       - name: Build console executable
-        run: python -m PyInstaller --clean --noconfirm --onefile --console --name cc2flash --hidden-import hid packaging/entrypoint.py
+        run: python -m PyInstaller --clean --noconfirm --onefile --console --name cc2camera --hidden-import hid packaging/entrypoint.py
       - name: Smoke-test frozen application outside source tree
-        run: python packaging/smoke_test.py dist/cc2flash.exe
+        run: python packaging/smoke_test.py dist/cc2camera.exe
       - name: Hash executable
         shell: pwsh
         run: |
-          $hash = (Get-FileHash dist/cc2flash.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  cc2flash.exe" | Set-Content dist/cc2flash.exe.sha256 -Encoding ascii
+          $hash = (Get-FileHash dist/cc2camera.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  cc2camera.exe" | Set-Content dist/cc2camera.exe.sha256 -Encoding ascii
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-executable
           path: |
-            dist/cc2flash.exe
-            dist/cc2flash.exe.sha256
+            dist/cc2camera.exe
+            dist/cc2camera.exe.sha256
           if-no-files-found: error
 
   attach:
@@ -57,4 +57,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$RELEASE_TAG" dist/cc2flash.exe dist/cc2flash.exe.sha256
+        run: gh release upload "$RELEASE_TAG" dist/cc2camera.exe dist/cc2camera.exe.sha256

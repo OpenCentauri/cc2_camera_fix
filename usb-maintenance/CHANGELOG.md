@@ -13,7 +13,7 @@
 - Added fail-closed restore preparation that dynamically derives and validates
   the live SFC object, temporarily selects the supported 4 KiB erase size, and
   verifies readback before sending the stock HID flag request.
-- Physically validated the integrated one-command `cc2flash restore` path on
+- Physically validated the integrated one-command `cc2camera restore` path on
   the supported camera and exact gated kernel: three stable pre-write reads,
   automatic RAM preparation, stock bootloader entry, all 2,742 packets, full
   8 MiB erase/write, normal reboot, and three stable post-write reads matching
@@ -33,7 +33,7 @@
 - Split strict preserved-backup loading from its compatibility hash API so the
   restore guard compares actual bytes, not only filenames or unit identifiers.
 - Documented the complete
-  `cc2flash backup → cc2_sig_tool build → cc2flash restore` workflow.
+  `cc2camera backup → cc2_sig_tool build → cc2camera restore` workflow.
 - Post-restore verification now asks for separate interactive consent before
   starting ADB temporarily when a clean config returns without the persistent
   hook. Restore `--yes` does not bypass this prompt; declined and non-interactive
@@ -119,7 +119,7 @@
 ## v0.5.0 — complete public Python command library
 
 - Bumped the Python client to v0.3.0.
-- Added the audit-oriented `cc2flash.commands` module with all 57 exact
+- Added the audit-oriented `cc2camera.commands` module with all 57 exact
   normal-mode command values, all 21 configuration GET/SET pairs, all 13 upload
   operations, the complete 16-bit dispatcher map, and group-wide `0x4xxx`
   matching.

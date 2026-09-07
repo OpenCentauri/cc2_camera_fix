@@ -11,7 +11,7 @@ import zipfile
 import zlib
 
 
-from cc2flash import image as tool
+from cc2camera import image as tool
 
 
 def usb_manifest(image: bytes) -> dict:

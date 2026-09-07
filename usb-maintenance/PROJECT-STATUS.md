@@ -41,7 +41,7 @@
   U-Boot state machine as annotated C-like source with exact address anchors.
 - Added reproducible extraction/disassembly commands and dependency-free packet
   vectors for independent review.
-- Added `cc2flash.commands`, a public typed catalog for all 57 exact normal-HID
+- Added `cc2camera.commands`, a public typed catalog for all 57 exact normal-HID
   commands, the full 16-bit dispatcher behavior, and all four U-Boot frame types.
 - Added side-effect-free builders for every recovered operation, plus typed ACK
   and terminal-status decoders, with source anchors and safety comments beside

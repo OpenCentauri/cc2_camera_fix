@@ -662,7 +662,7 @@ This choice is runtime-grounded: on Windows 11 with ADB 35.0.2, a live
 
 ### 9.1 Temporary upload-command start
 
-`cc2flash start-adb` uses two confirmed bugs without weakening
+`cc2camera start-adb` uses two confirmed bugs without weakening
 the general upload-path API:
 
 1. literal targets are truncated only at the first ASCII space; and
@@ -712,7 +712,7 @@ uploader state.
 
 ### 9.2 Persistent startup hook
 
-`cc2flash install-adb-startup` warns that it will overwrite an existing file,
+`cc2camera install-adb-startup` warns that it will overwrite an existing file,
 then requires either the interactive phrase `ENABLE-ADB` or its explicit
 noninteractive `--yes` option. It sends this normal-HID sequence:
 

@@ -40,7 +40,7 @@ EXPECTED_PARTITIONS = (
     ("config", 0x020000),
 )
 
-# Keep these aligned with cc2flash/image.py. Three matching physical reads are
+# Keep these aligned with cc2camera/image.py. Three matching physical reads are
 # the repository-wide minimum for every image.
 # USB acquisition gets two extra chances because live testing showed JFFS2 may
 # still change immediately after the one-shot ADB startup command.
@@ -66,7 +66,7 @@ BACKUP_ARCHIVE_MEMBERS = frozenset(
 )
 MAX_MANIFEST_SIZE = 1024 * 1024
 
-# cc2flash/image.py is intentionally allowed to change only
+# cc2camera/image.py is intentionally allowed to change only
 # its audited SquashFS window and the writable config partition.  Restore uses
 # these boundaries to prove that a candidate still belongs to the camera whose
 # preserved USB backup authorizes the write.
@@ -309,7 +309,7 @@ class AdbClient:
         # transports can alter line endings. Each partition instead goes to a
         # fresh private host file via the ADB sync protocol, is size-checked,
         # appended in validated MTD order, and is removed with the directory.
-        with tempfile.TemporaryDirectory(prefix="cc2flash-adb-pull-") as directory:
+        with tempfile.TemporaryDirectory(prefix="cc2camera-adb-pull-") as directory:
             temporary_directory = Path(directory)
             for part in parts:
                 local_path = temporary_directory / f"mtd{part.index}.bin"
@@ -395,6 +395,7 @@ def acquire_stable(
         )
     digest = hashes(accepted)
     manifest = {
+        # Preserve the on-disk format for existing backups and readers.
         "format": "cc2flash-backup-v2",
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "adb_serial": adb.serial,

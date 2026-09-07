@@ -8,9 +8,9 @@ import tempfile
 import unittest
 from unittest import mock
 
-from cc2flash import cli, restore_prepare as prep
-from cc2flash.adb_backup import AdbClient, AdbUnavailable, EXPECTED_PARTITIONS, MtdPartition
-from cc2flash.protocol import FLASH_SIZE, ProtocolError
+from cc2camera import cli, restore_prepare as prep
+from cc2camera.adb_backup import AdbClient, AdbUnavailable, EXPECTED_PARTITIONS, MtdPartition
+from cc2camera.protocol import FLASH_SIZE, ProtocolError
 
 
 class PreparationTests(unittest.TestCase):

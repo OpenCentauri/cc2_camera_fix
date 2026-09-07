@@ -1,4 +1,4 @@
-"""Command-line interface for cc2flash."""
+"""Command-line interface for cc2camera."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def _adb(args) -> AdbClient:
 
 
 def _common_command(args, command: str) -> list[str]:
-    result = ["cc2flash", command]
+    result = ["cc2camera", command]
     if args.adb != "adb":
         result += ["--adb", args.adb]
     if args.serial:
@@ -207,7 +207,7 @@ def command_start_adb(args) -> int:
     else:
         identity, _parts = adb.identity_and_partitions()
         print(f"ADB is already online; no HID command was sent. Identity: {identity}")
-        print("You can now run cc2flash backup <output.zip>.")
+        print("You can now run cc2camera backup <output.zip>.")
         return 0
 
     print(
@@ -432,7 +432,7 @@ def parser() -> argparse.ArgumentParser:
     common.add_argument("--adb", default="adb", help="ADB executable (default: adb)")
     common.add_argument("--serial", help="ADB device serial; not the camera's embedded identity")
 
-    result = argparse.ArgumentParser(prog="cc2flash", description="Back up, inspect, repair and restore the supported Elegoo CC2 stock camera.")
+    result = argparse.ArgumentParser(prog="cc2camera", description="Inspect, back up, maintain and recover the supported Elegoo CC2 stock camera.")
     result.add_argument("--version", action="version", version=__version__)
     commands = result.add_subparsers(dest="command", required=True)
 
@@ -463,7 +463,7 @@ def parser() -> argparse.ArgumentParser:
     inspect = commands.add_parser("inspect-image", help="validate a raw dump or backup ZIP; offline, no output files")
     build = commands.add_parser("build-image", help="build a camera-specific recovery bundle; offline")
     for command in (inspect, build):
-        command.add_argument("image", metavar="INPUT", help="raw 8 MiB dump or unmodified cc2flash backup ZIP")
+        command.add_argument("image", metavar="INPUT", help="raw 8 MiB dump or unmodified cc2camera backup ZIP")
         command.add_argument("--confirm-read", action="append", default=[], metavar="DUMP",
                              help="additional independent read that must match; repeat for each file")
         command.add_argument("--show-identifiers", action="store_true", help="show full unit identifiers in the analysis report")
@@ -477,7 +477,7 @@ def parser() -> argparse.ArgumentParser:
 
     restore = commands.add_parser("restore", parents=[common], help="write and verify a full camera image, or check it offline with --dry-run")
     restore.add_argument("image", metavar="IMAGE")
-    restore.add_argument("--backup", required=True, metavar="BACKUP.zip", help="preserved three-read cc2flash backup archive")
+    restore.add_argument("--backup", required=True, metavar="BACKUP.zip", help="preserved three-read cc2camera backup archive")
     restore.add_argument("--dry-run", action="store_true", help="local validation only; no USB or ADB access")
     restore.add_argument("--bootloader-timeout", type=_positive_finite_duration, default=30, help="bootloader USB wait in seconds (default: 30)")
     restore.add_argument("--reboot-timeout", type=_positive_finite_duration, default=180, help="normal USB return wait in seconds (default: 180)")
@@ -493,7 +493,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return int(args.func(args) or 0)
     except (ProtocolError, image_tools.ValidationError, OSError, EOFError) as exc:
-        print(f"cc2flash: error: {exc}", file=sys.stderr)
+        print(f"cc2camera: error: {exc}", file=sys.stderr)
         return 2
 
 

@@ -102,7 +102,7 @@ unmodified stock startup was not independently tested.
 - access to a printer with a 0.2 mm nozzle;
 - four P50 pogo pins, such as P50-J1;
 - the USB-A plug and cable from an unused USB data cable;
-- [cc2flash installed](docs/INSTALLATION.md), either the Windows executable or Python package;
+- [cc2camera installed](docs/INSTALLATION.md), either the Windows executable or Python package;
 - the Android platform `adb` executable as described in the installation guide.
 
 ### Build the camera-to-USB cable
@@ -132,12 +132,12 @@ confirm that +5 V is not shorted to ground or either data line.
 
 ### 1. Start ADB and make a backup
 
-Follow the [installation guide](docs/INSTALLATION.md) for `cc2flash` and `adb`.
+Follow the [installation guide](docs/INSTALLATION.md) for `cc2camera` and `adb`.
 Connect only one camera, then run:
 
 ```sh
-cc2flash start-adb
-cc2flash backup backup.zip
+cc2camera start-adb
+cc2camera backup backup.zip
 ```
 
 Use the command prefix from your [platform's installation instructions](docs/INSTALLATION.md).
@@ -156,7 +156,7 @@ connected until installation and file readback finish. Read the
 conditions before running:
 
 ```sh
-cc2flash install-erase-fix --backup backup.zip
+cc2camera install-erase-fix --backup backup.zip
 ```
 
 Confirm with `INSTALL-ERASE-FIX` when prompted. The command checks the camera,
@@ -175,7 +175,7 @@ After successful installation, restart the camera manually. Without optional
 persistent ADB, run `start-adb` again to reconnect for verification:
 
 ```sh
-cc2flash start-adb
+cc2camera start-adb
 adb shell cat /tmp/cc2-hooks.log
 ```
 
@@ -197,7 +197,7 @@ Persistent ADB is useful for future maintenance, but is not required for the
 erase fix. To enable it, while ADB is online, run:
 
 ```sh
-cc2flash install-adb-startup --backup backup.zip
+cc2camera install-adb-startup --backup backup.zip
 ```
 
 Confirm with `ENABLE-ADB`. This writes a separate startup hook and performs its
@@ -213,12 +213,12 @@ connected throughout restore and verification. Detailed prerequisites and stop
 conditions are in the [USB-maintenance reference](usb-maintenance/REFERENCE.md).
 
 ```sh
-cc2flash build-image backup.zip
-cc2flash restore backup-cc2-recovery/cc2-camera-recovery.bin --backup backup.zip
+cc2camera build-image backup.zip
+cc2camera restore backup-cc2-recovery/cc2-camera-recovery.bin --backup backup.zip
 ```
 
 The builder validates the backup and creates the preventive image. Do not pass
-`--adb` to offline `build-image`. If needed, run `cc2flash start-adb` again before
+`--adb` to offline `build-image`. If needed, run `cc2camera start-adb` again before
 `restore` and add `--adb "path/to/adb"` to that connected-camera command.
 
 The optional `restore --dry-run` performs the same-camera and allowed-change
@@ -248,7 +248,7 @@ a command line.
 - an SOIC-8 test clip and cable;
 - a multimeter;
 - NeoProgrammer;
-- [cc2flash installed](docs/INSTALLATION.md); the standalone Windows executable needs no Python or Git.
+- [cc2camera installed](docs/INSTALLATION.md); the standalone Windows executable needs no Python or Git.
 
 The CH341 worked with the flash still soldered on the tested camera. A Bus
 Pirate is possible but was not reliable in-circuit on that setup; see the
@@ -299,7 +299,7 @@ Open a terminal in the folder containing your three dump files, as described
 in the [installation guide](docs/INSTALLATION.md). Run:
 
 ```sh
-cc2flash build-image cc2-camera-1.bin --confirm-read cc2-camera-2.bin --confirm-read cc2-camera-3.bin
+cc2camera build-image cc2-camera-1.bin --confirm-read cc2-camera-2.bin --confirm-read cc2-camera-3.bin
 ```
 
 The command performs the stability, firmware, flash-layout, identity, patch,
@@ -364,7 +364,7 @@ No full camera dump or vendor firmware image is included in this repository.
 ## Advanced and audit documentation
 
 - [Installation and release downloads](docs/INSTALLATION.md)
-- [Complete cc2flash command reference](docs/CLI.md)
+- [Complete cc2camera command reference](docs/CLI.md)
 - [Startup-fix installation and verification](docs/STARTUP-HOOKS.md)
 - [Startup-fix hardware findings](docs/STARTUP-HOOKS-VALIDATION.md)
 - [Programmer and alternative-hardware reference](hardware-recovery/PROGRAMMER_REFERENCE.md)

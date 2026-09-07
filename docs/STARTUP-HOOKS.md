@@ -17,19 +17,19 @@ config while `ucamera` is running.
 ## Install from a checkout
 
 Use the setup instructions in [INSTALLATION.md](INSTALLATION.md). Run from the
-repository root so `python -m cc2flash` uses this checkout. Connect only one
+repository root so `python -m cc2camera` uses this checkout. Connect only one
 camera. Obtain temporary ADB and preserve its backup first:
 
 ```sh
-python -m cc2flash start-adb
-python -m cc2flash backup before-hooks.zip
-python -m cc2flash install-erase-fix --backup before-hooks.zip
+python -m cc2camera start-adb
+python -m cc2camera backup before-hooks.zip
+python -m cc2camera install-erase-fix --backup before-hooks.zip
 ```
 
 Optional persistent ADB can be installed afterward, while ADB is online:
 
 ```sh
-python -m cc2flash install-adb-startup --backup before-hooks.zip
+python -m cc2camera install-adb-startup --backup before-hooks.zip
 ```
 
 Install the erase fix first so optional ADB does not consume its required space.
@@ -108,7 +108,7 @@ No automatic cleanup writes config after an error.
 ## Verify on the camera
 
 After the erase-fix command reports successful file readback, restart manually.
-If persistent ADB was not installed, run `cc2flash start-adb` again to reconnect. Do not
+If persistent ADB was not installed, run `cc2camera start-adb` again to reconnect. Do not
 run the erase hook yourself while the camera service is active.
 
 ```sh
@@ -137,7 +137,7 @@ Expected observations:
 Capture another backup and the kernel log without modifying config:
 
 ```sh
-python -m cc2flash backup after-hooks.zip
+python -m cc2camera backup after-hooks.zip
 adb shell dmesg
 ```
 

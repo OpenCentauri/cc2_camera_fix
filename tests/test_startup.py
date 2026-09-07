@@ -9,10 +9,10 @@ import tempfile
 import unittest
 from unittest import mock
 
-from cc2flash import startup, cli
-from cc2flash import startup_payloads as payloads
-from cc2flash.image import jffs2_crc
-from cc2flash.protocol import ProtocolError
+from cc2camera import startup, cli
+from cc2camera import startup_payloads as payloads
+from cc2camera.image import jffs2_crc
+from cc2camera.protocol import ProtocolError
 
 
 def clean_config(count=7):
@@ -129,7 +129,7 @@ class InstallerTests(unittest.TestCase):
                 self.assertEqual(written,reason=='readback')
 
     def test_offline_adb_and_bad_partition_geometry_never_stage(self):
-        from cc2flash.adb_backup import AdbUnavailable
+        from cc2camera.adb_backup import AdbUnavailable
         for reason in ('offline', 'geometry'):
             with self.subTest(reason=reason), ExitStack() as stack:
                 adb, events, _ = self.setup_install(stack)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import struct
 import unittest
 
-from cc2flash.commands import (
+from cc2camera.commands import (
     ADB_UPLOAD_COMMAND_TARGET,
     BOOT_FRAME_TYPES,
     CONFIGURATION_COMMANDS,
@@ -32,7 +32,7 @@ from cc2flash.commands import (
     decode_boot_terminal_status,
     describe_normal_command,
 )
-from cc2flash.protocol import (
+from cc2camera.protocol import (
     BOOT_DATA_SIZE,
     BOOT_REPORT_SIZE,
     ProtocolError,
