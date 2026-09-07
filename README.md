@@ -1,15 +1,17 @@
 # Prevent or recover the Elegoo CC2 stock camera failure
 
 Some stock Elegoo Centauri Carbon 2 cameras can stop working after repeated
-printer power cycles. This repository provides two ways to protect or recover
+printer power cycles. This repository provides ways to protect or recover
 an affected camera:
 
-- a camera that still works can be backed up, patched, and restored through
-  USB without opening it or using an external programmer;
+- a working camera can receive a small startup fix through USB without
+  flashing a firmware image;
+- if there is too little free space to install that fix, use a same-camera
+  backup to build and restore a preventive image through USB;
 - a camera that no longer starts can be recovered from its own flash backup
   with an external programmer.
 
-Both routes preserve the identity of **your** camera. There is no generic
+All routes preserve the identity of **your** camera. There is no generic
 firmware image in this repository, and you must never write another camera's
 dump to your device.
 
@@ -24,7 +26,7 @@ The known failure affects the `EF-S7-V1.0.30B` camera family. A newer
 affected by this particular problem.
 
 Do this identification before building a USB cable, buying a programmer, or
-running either tool.
+running the tools.
 
 1. Power the printer off and unplug it from mains power.
 2. Remove the camera module from the printer by undoing its single mounting
@@ -82,17 +84,17 @@ to the stock camera. Stop this camera-recovery procedure.
 
 ## Working camera: USB prevention
 
-This route backs up the camera, builds its camera-specific preventive image,
-and writes that image through USB without requiring an SPI programmer.
+Start with the startup fix below. It writes small configuration files and
+reapplies a correction each time the camera starts, allowing its filesystem to
+reclaim deleted data. It requires no SPI programmer or firmware-image write.
+The installer checks that enough already erased space is available before
+writing. If space is insufficient, use the
+[image restore fallback](#if-there-is-not-enough-space-build-and-restore-an-image).
 
-An experimental alternative installs [early-boot config hooks](docs/STARTUP-HOOKS.md)
-without flashing a firmware image. It requires online root ADB, a preserved
-backup and substantial clean config space. It writes config files and applies
-a RAM erase-size correction on each boot. This hook workflow has
-[physical validation on one supported camera](docs/STARTUP-HOOKS-VALIDATION.md),
-including repeated boots and a bounded garbage-collection pressure test.
-If installation is refused for insufficient space, use the image-based
-workflow below.
+The startup fix is [physically tested on one supported camera](docs/STARTUP-HOOKS-VALIDATION.md),
+including repeated boots and a bounded write/delete pressure test. That camera
+already had the earlier preventive image patch; hook-only operation on otherwise
+unmodified stock startup was not independently tested.
 
 ### What you need
 
@@ -128,39 +130,109 @@ Do not trust wire colors unverified. Before connecting the camera, use a
 multimeter to confirm every conductor from the USB plug to its pogo pin and
 confirm that +5 V is not shorted to ground or either data line.
 
-### USB prevention command sequence
+### 1. Start ADB and make a backup
 
-Installation and detailed stop conditions are documented in the
-[USB-maintenance reference](usb-maintenance/REFERENCE.md). After following the [installation guide](docs/INSTALLATION.md) for `cc2flash`
-and `adb`, the supported sequence is:
+Follow the [installation guide](docs/INSTALLATION.md) for `cc2flash` and `adb`.
+Connect only one camera, then run:
 
 ```sh
 cc2flash start-adb
 cc2flash backup backup.zip
+```
+
+Use the command prefix from your [platform's installation instructions](docs/INSTALLATION.md).
+If ADB is not on PATH, add `--adb "path/to/adb"` to connected-camera commands.
+
+`start-adb` temporarily starts the camera's existing root ADB service, which
+lets the computer run maintenance commands. `backup` reads the complete flash
+repeatedly and publishes `backup.zip` only after obtaining three consecutive
+identical images. Keep that ZIP unchanged and in a separate safe location.
+
+### 2. Install the startup fix
+
+This step writes files to the camera's configuration partition. Keep power
+connected until installation and file readback finish. Read the
+[startup-hook guide](docs/STARTUP-HOOKS.md) for prerequisites and recovery
+conditions before running:
+
+```sh
+cc2flash install-erase-fix --backup backup.zip
+```
+
+Confirm with `INSTALL-ERASE-FIX` when prompted. The command checks the camera,
+backup, firmware and available space, then installs and reads back the files.
+It applies the correction on the next boot; installation does not restart the
+camera automatically.
+
+If the command refuses installation **because there is insufficient space**,
+continue with the image restore fallback below. For other refusals or any
+write/readback failure, stop and resolve the reported problem before proceeding.
+Do not bypass validation or retry a partial installation blindly.
+
+### 3. Restart and verify
+
+After successful installation, restart the camera manually. Without optional
+persistent ADB, run `start-adb` again to reconnect for verification:
+
+```sh
+cc2flash start-adb
+adb shell cat /tmp/cc2-hooks.log
+```
+
+The log should contain:
+
+```text
+cc2flash: erase fix active; master=0x1000; partition geometry=0x4000
+cc2flash: 10-erase-fix.sh exit 0
+```
+
+Follow the [remaining verification checks](docs/STARTUP-HOOKS.md#verify-on-the-camera)
+and confirm the camera feed works before returning it to service. A successful
+installation message alone does not establish that the boot hook ran. Stop if
+the hook fails or the camera no longer works normally.
+
+### Optional: keep ADB available after restart
+
+Persistent ADB is useful for future maintenance, but is not required for the
+erase fix. To enable it, while ADB is online, run:
+
+```sh
+cc2flash install-adb-startup --backup backup.zip
+```
+
+Confirm with `ENABLE-ADB`. This writes a separate startup hook and performs its
+own space checks and readback. After the next restart, ADB should return without
+`start-adb`. The erase fix remains independently installed if optional ADB
+installation is refused.
+
+### If there is not enough space: build and restore an image
+
+Use the unchanged backup from step 1. This route builds a camera-specific
+preventive image and **writes that image to flash through USB**. Keep power
+connected throughout restore and verification. Detailed prerequisites and stop
+conditions are in the [USB-maintenance reference](usb-maintenance/REFERENCE.md).
+
+```sh
 cc2flash build-image backup.zip
 cc2flash restore backup-cc2-recovery/cc2-camera-recovery.bin --backup backup.zip
 ```
 
-Use the command prefix from your [platform's installation instructions](docs/INSTALLATION.md).
-If ADB is not on PATH, add `--adb "path/to/adb"` to connected-camera commands,
-but not to offline `build-image`. `restore --dry-run` accepts these options
-without using them.
+The builder validates the backup and creates the preventive image. Do not pass
+`--adb` to offline `build-image`. If needed, run `cc2flash start-adb` again before
+`restore` and add `--adb "path/to/adb"` to that connected-camera command.
 
-`start-adb` temporarily starts the camera's existing root ADB service.
-`backup` then reads the complete flash repeatedly and publishes `backup.zip`
-only after obtaining three consecutive identical images. Keep that ZIP
-unchanged and in a separate safe location.
-
-The builder validates the backup and creates the camera-specific preventive
-image. The optional `restore --dry-run` performs the same-camera and allowed-change checks
-without opening USB. `restore` repeats those checks, validates the live camera
-against the preserved backup, temporarily prepares the known stock SFC driver,
-and requires the literal confirmation `RESTORE-CC2` before its first write.
-Keep power connected until it returns to normal USB and completes the required
-three-read verification. Preserve both the original ZIP and recovery image.
+The optional `restore --dry-run` performs the same-camera and allowed-change
+checks without opening USB. `restore` repeats those checks, validates the live
+camera against the preserved backup, temporarily prepares the known stock SFC
+driver, and requires the literal confirmation `RESTORE-CC2` before its first
+write. Keep power connected until it returns to normal USB and completes the
+required three-read verification. Preserve both the original ZIP and recovery
+image, then confirm the camera feed works.
 
 Stop if any command refuses the camera, backup, firmware, partition layout, or
-generated image. Do not work around a validation failure.
+generated image. Do not work around a validation failure. This fallback is for
+insufficient space before hook installation; restoring an image from a backup
+that already contains hooks has [additional limitations](docs/STARTUP-HOOKS.md#recovery-and-compatibility).
 
 ## Failed camera: hardware recovery
 
@@ -262,10 +334,18 @@ printer.
 ## What the repair changes
 
 Affected cameras repeatedly rewrite the same configuration files during every
-boot. Old filesystem records accumulate until the writable configuration area
-can no longer accept the next boot-time writes. The repair compacts that area,
-preserves the camera's own identity, and changes the startup behavior so the
-default files are created only when missing.
+boot. A defect in the flash driver prevents reliable cleanup of deleted data,
+so old filesystem records accumulate until the writable configuration area can
+no longer accept the next boot-time writes.
+
+The startup fix corrects the driver's erase setting in memory each boot so
+filesystem cleanup can work. It leaves the firmware image in place and stores
+its startup files in the writable configuration area.
+
+The image-based repair compacts that area, preserves the camera's own identity,
+and changes startup behavior so default files are created only when missing.
+It reduces unnecessary writes; it does not persistently repair the driver's
+erase setting.
 
 The builder accepts only the known 30B firmware family and allows changes only
 inside the audited startup-script window and writable configuration partition.
@@ -285,6 +365,8 @@ No full camera dump or vendor firmware image is included in this repository.
 
 - [Installation and release downloads](docs/INSTALLATION.md)
 - [Complete cc2flash command reference](docs/CLI.md)
+- [Startup-fix installation and verification](docs/STARTUP-HOOKS.md)
+- [Startup-fix hardware findings](docs/STARTUP-HOOKS-VALIDATION.md)
 - [Programmer and alternative-hardware reference](hardware-recovery/PROGRAMMER_REFERENCE.md)
 - [Independent recovery-tool verification](hardware-recovery/CC2_RECOVERY_VERIFICATION.md)
 - [Hardware-recovery regression results](hardware-recovery/TEST_RESULTS.md)
