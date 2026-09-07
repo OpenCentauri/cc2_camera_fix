@@ -85,6 +85,13 @@ to the stock camera. Stop this camera-recovery procedure.
 This route backs up the camera, builds its camera-specific preventive image,
 and writes that image through USB without requiring an SPI programmer.
 
+An experimental alternative installs [early-boot config hooks](docs/STARTUP-HOOKS.md)
+without flashing a firmware image. It requires online root ADB, a preserved
+backup and substantial clean config space. It writes config files and applies
+a RAM erase-size correction on each boot. This hook workflow has offline tests
+but still needs physical verification; it is not yet established as a reliable
+replacement for the recovery workflow below.
+
 ### What you need
 
 - the affected camera, still able to start;

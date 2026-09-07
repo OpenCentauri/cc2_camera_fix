@@ -12,7 +12,8 @@ current folder. Python installations also support `python -m cc2flash`.
 cc2flash devices [--adb EXECUTABLE]
 cc2flash device-info [--adb EXECUTABLE] [--serial SERIAL]
 cc2flash start-adb [--adb EXECUTABLE] [--serial SERIAL] [--timeout SECONDS]
-cc2flash install-adb-startup [--adb EXECUTABLE] [--serial SERIAL] [--yes]
+cc2flash install-adb-startup --backup BACKUP.zip [--adb EXECUTABLE] [--serial SERIAL] [--yes]
+cc2flash install-erase-fix --backup BACKUP.zip [--adb EXECUTABLE] [--serial SERIAL] [--yes]
 cc2flash backup OUTPUT.zip [--adb EXECUTABLE] [--serial SERIAL]
     [--accept-bootloader-sha256 SHA256]
 ```
@@ -22,9 +23,17 @@ cc2flash backup OUTPUT.zip [--adb EXECUTABLE] [--serial SERIAL]
   This is not a complete firmware-image inspection.
 - `start-adb`: temporarily start the existing daemon; no persistent startup
   file. Default timeout: 30 seconds.
-- `install-adb-startup`: overwrite `/etc/conf.d/system.sh` with the known
-  ADB startup content. Requires `ENABLE-ADB` confirmation or `--yes`.
-  Restart manually afterward; successful installation exits with status 0.
+- `install-adb-startup`: install `enabled/90-adb.sh` and the shared
+  `/etc/conf.d/system.sh` runner. Requires `ENABLE-ADB` or `--yes`.
+- `install-erase-fix`: install `enabled/10-erase-fix.sh` and the shared runner.
+  Requires `INSTALL-ERASE-FIX` or `--yes`. It corrects the known kernel's master
+  erase size in RAM before camera startup on subsequent boots.
+  Both installers require online root ADB, a preserved same-camera backup,
+  stable live reads and sufficient clean config space. They perform config
+  file writes, not firmware flashing; neither remounts config during installation.
+  Unknown existing scripts are refused. Restart manually and follow
+  [startup hook verification](STARTUP-HOOKS.md); the erase hook is experimental
+  and hardware-unverified.
 - `backup`: require three consecutive identical full reads within five
   attempts, then publish a new ZIP atomically. Never overwrites a backup.
   If ADB is offline, explicitly start it and rerun backup; backup itself is

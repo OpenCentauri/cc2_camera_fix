@@ -39,8 +39,6 @@ from .protocol import (
 )
 
 
-ADB_STARTUP_PATH = "/etc/conf.d/system.sh"
-ADB_STARTUP_CONTENT = b"/bin/adbd &"
 ADB_UPLOAD_COMMAND_CONTENT = b"\n"
 NORMAL_UPLOAD_CHUNK_SIZE = NORMAL_REPORT_SIZE - 14
 NORMAL_UPLOAD_CAPACITY = 0x01000200
@@ -165,12 +163,6 @@ def upload_normal_file(path: str, content: bytes) -> None:
                 build_upload_data_request(sequence, chunk, final=final),
             )
         exchange_normal(handle, build_upload_commit_request())
-
-
-def install_adb_startup() -> None:
-    """Install the exact boot hook that starts the existing root ``adbd``."""
-
-    upload_normal_file(ADB_STARTUP_PATH, ADB_STARTUP_CONTENT)
 
 
 def start_adb_through_upload_command() -> None:
