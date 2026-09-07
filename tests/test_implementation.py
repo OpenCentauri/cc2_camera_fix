@@ -138,6 +138,20 @@ class ImplementationTests(unittest.TestCase):
                     invariant_sha256,
                 ),
             ):
+                for unsupported_length in (0x106, 0x200):
+                    corrupted = bytearray(image)
+                    corrupted[
+                        tool.HW_RECORD_START + 2:tool.HW_RECORD_PAYLOAD_START
+                    ] = unsupported_length.to_bytes(2, "little")
+                    with self.subTest(unsupported_length=unsupported_length):
+                        with self.assertRaisesRegex(
+                            tool.ValidationError, "physically observed"
+                        ):
+                            tool.analyze_image(
+                                bytes(corrupted),
+                                f"synthetic-length-{unsupported_length}",
+                            )
+
                 result = tool.build_recovery(
                     primary,
                     output,
