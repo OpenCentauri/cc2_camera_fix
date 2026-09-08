@@ -10,7 +10,8 @@ Run as root on an idle printer. ARMv7 Linux; no Python, ADB, hidraw or shared
 libraries required by the static build. Only known camera firmware is supported.
 
   cc2camera-hid inspect
-      Read USB descriptors and query the camera version. No camera file writes.
+      Read USB descriptors; query the version only for a supported HID camera.
+      Recognized 30D signatures need no patch and receive no camera commands.
   cc2camera-hid install --accept-no-backup-space-risk
       Install the persistent erase-fix hook through HID. NO BACKUP is exported,
       and safe clean space is NOT checked. A failed write or power loss can leave
@@ -64,6 +65,21 @@ fn terminal(payload: &[u8], token: &str, action: &Action) -> Result<bool> {
         _ => Err("unexpected camera operation status".into()),
     }
 }
+const NEWER_MESSAGE: &str = "USB signature matches the observed EF-S7-V1.0.30D camera. This patch does not apply to that revision. No camera commands sent.";
+fn with_hid_camera(
+    found: usb::Discovery,
+    action: &Action,
+    use_camera: impl FnOnce(usb::Camera) -> Result<()>,
+) -> Result<()> {
+    match found {
+        usb::Discovery::Newer30d if *action == Action::Inspect => {
+            println!("{NEWER_MESSAGE}");
+            Ok(())
+        }
+        usb::Discovery::Newer30d => Err(NEWER_MESSAGE.into()),
+        usb::Discovery::Hid(camera) => use_camera(camera),
+    }
+}
 fn run() -> Result<()> {
     // Parse consent and prepare every outgoing target before touching USB.
     let action=arguments(&std::env::args().skip(1).collect::<Vec<_>>())?;
@@ -75,7 +91,7 @@ fn run() -> Result<()> {
         let payload=script(&token,&action)?;
         Some((token,payload))
     } else { None };
-    let camera=usb::discover()?;
+    with_hid_camera(usb::discover()?, &action, |camera| {
     println!("Camera {}: HID interface {}, input 0x{:02x}, output {:?}",camera.path,camera.interface.number,camera.interface.input,camera.interface.output);
     let mut transport=usb::Usb::open(camera)?;
     let (status,version)=send(&mut transport,1,&[],1,0)?;
@@ -103,6 +119,7 @@ fn run() -> Result<()> {
         return Err("timed out: outcome unknown; camera worker may still be running".into());
     }
     Ok(())
+    })
 }
 fn main() {
     if let Err(e)=run() {
@@ -114,6 +131,15 @@ fn main() {
 mod tests {
     use super::*;
     fn args(a:&[&str])->Vec<String> {a.iter().map(|s|s.to_string()).collect()}
+    #[test]
+    fn newer_camera_never_reaches_usb_open_for_any_command() {
+        for action in [Action::Inspect, Action::Install, Action::Verify] {
+            let result = with_hid_camera(usb::Discovery::Newer30d, &action, |_| {
+                panic!("30D must never reach USB open, interface claim or command sending")
+            });
+            assert_eq!(result.is_ok(), action == Action::Inspect);
+        }
+    }
     #[test]
     fn consent_and_unknown_arguments() {
         assert!(arguments(&args(&["install"])).is_err());

@@ -71,7 +71,15 @@ computer before copying the binary. Adjust the drive mount path if necessary.
 Copying to `/tmp` avoids execution permissions on the USB drive; the executable
 must be copied there again after a printer restart.
 
-`inspect` reads descriptors and sends only the version-query command. It does
+`inspect` recognizes the observed EF-S7-V1.0.30D USB signature from descriptors
+and manufacturer/product strings. For that signature it reports that the patch
+does not apply, exits successfully, and never opens the USB device node or sends
+a camera command. `install` and `verify` refuse that signature without USB access.
+The match requires revision `0414` and the specific two-function UVC layout;
+shared USB IDs or missing HID alone do not establish a 30D. Unknown layouts
+remain unsupported. Multiple matching-ID cameras are refused before classification.
+
+For a supported HID camera, `inspect` sends only the version-query command. It does
 not upload scripts or change camera files. Expect exactly one camera, its
 selected HID interface and endpoints, and a printable version response. USB
 identification and a version reply alone do **not** establish compatible

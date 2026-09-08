@@ -31,11 +31,74 @@ The developer supplied this shell evidence:
   after excluding buffers/cache in the supplied snapshot;
 - no `/dev/hidraw*` nodes, but USB device nodes under `/dev/bus/usb`.
 
+The developer subsequently identified the camera used for that snapshot as
+EF-S7-V1.0.30D, not 30B. The absence of `hidraw` in this observation therefore
+does not establish whether the printer exposes `hidraw` with a 30B connected.
+The direct usbfs backend does not depend on that distinction.
+
 This establishes an architecture and a candidate USB access mechanism. It does
 not establish successful interface claiming, report transfer, camera-side worker
 execution, or a working installation. USB descriptors must still be inspected on
 hardware; the implementation discovers endpoint addresses instead of assuming
 an interface number or address from the changing device-node numbers.
+
+## Observed 30D USB signature
+
+A developer-confirmed 30D supplied a complete 1,005-byte (`0x3ed`) USB descriptor
+snapshot through the printer's sysfs. It declares one configuration of 987 bytes
+(`0x3db`), four interface numbers, and two UVC function associations. The developer
+also observes two cameras under Windows for the 30D, versus one for the 30B.
+These are USB functions, not evidence of two physical image sensors.
+
+| Attribute | Observed 30D value |
+|---|---|
+| VID:PID | `a108:2240` — shared with the 30B |
+| `bcdUSB`, `bcdDevice` | `0200`, `0414` |
+| Device class/subclass/protocol | `ef/02/01` |
+| Manufacturer | `Linux Foundation` |
+| Product | `Multi Composite Double Uvc Gadget` |
+| First UVC function | Control interface 0; streaming interface 1, alternate settings 0/1; IN endpoint `0x81` at alternate 1 |
+| Second UVC function | Control interface 2; streaming interface 3, alternate settings 0/1; IN endpoint `0x82` at alternate 1 |
+| Endpoint attributes / maximum packet / interval | `05` / `03fc` (1,020 bytes) / `01`, for both streaming endpoints |
+| HID / ADB interfaces | Neither is declared in the sole configuration |
+
+The absence of an ADB USB interface is distinct from an exposed ADB interface
+whose daemon is not running. The developer confirms the 30B exposes both HID
+and ADB interfaces even when ADB is not enabled. The existing stock 30B bootstrap
+workflow also relies on that distinction.
+
+The native classifier matches the complete device/configuration header, total
+length, manufacturer/product strings, and ordered standard function/interface/
+endpoint descriptors above. Every intervening descriptor must be a well-bounded
+class-specific UVC interface descriptor (`0x24`). Its format/frame payload bytes
+are not matched. This is an observed USB signature, not authentication or a
+full-firmware fingerprint, and does not promise recognition of every 30D firmware
+revision. USB addresses, speed, serial strings and the currently selected video
+alternate settings are not used for recognition.
+
+Recognition happens using sysfs, before opening `/dev/bus/usb`, claiming an
+interface, or sending a version query. `inspect` reports that the signature
+matches the observed 30D and the patch does not apply to that revision.
+`install`/`verify` refuse it. Missing HID, a generic double-UVC device, a partial
+signature, malformed descriptors, or multiple matching-ID devices cannot produce
+that reassurance. Unknown devices still receive the ordinary unsupported result.
+
+Software coverage uses generated topology vectors with synthetic class-specific
+payloads. It checks signature mutations, truncation, malformed lengths, missing
+strings, wrong active configuration, mixed 30B/30D discovery and absence of USB
+access for every command on a recognized 30D. Live execution of this classifier
+on the printer remains unverified. No firmware disassembly is needed to establish
+this USB-level distinction.
+
+The read-only collection command for the observed topology was:
+
+```sh
+busybox hexdump -C /sys/bus/usb/devices/1-1.1/descriptors
+```
+
+That USB path is specific to the supplied connection and must be discovered
+again if topology changes. The sysfs manufacturer/product attributes supplied
+the string values; the binary descriptors contain string indices only.
 
 ## Protocol and transport
 

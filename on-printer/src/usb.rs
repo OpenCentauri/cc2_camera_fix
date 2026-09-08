@@ -69,7 +69,83 @@ pub fn interface(data: &[u8], active: u8) -> Result<Interface> {
     Ok(i)
 }
 
-pub fn discover() -> Result<Camera> {
+/// Observed USB identity only; never authorizes writes to a new firmware family.
+#[derive(Debug)]
+pub enum Discovery {
+    Hid(Camera),
+    Newer30d,
+}
+
+// Device/configuration and standard descriptors from the observed 30D topology.
+// Class-specific UVC payloads are deliberately not a firmware fingerprint.
+const D30_HEADER: &[u8] = &[
+    18, 1, 0, 2, 0xef, 2, 1, 64, 8, 0xa1, 0x40, 0x22, 0x14, 4, 1, 2, 3, 1,
+    9, 2, 0xdb, 3, 4, 1, 4, 0xc0, 1,
+];
+const D30_TOPOLOGY: &[&[u8]] = &[
+    &[8, 11, 0, 2, 14, 3, 0, 5],
+    &[9, 4, 0, 0, 0, 14, 1, 0, 5],
+    &[9, 4, 1, 0, 0, 14, 2, 0, 6],
+    &[9, 4, 1, 1, 1, 14, 2, 0, 6],
+    &[7, 5, 0x81, 5, 0xfc, 3, 1],
+    &[8, 11, 2, 2, 14, 3, 0, 8],
+    &[9, 4, 2, 0, 0, 14, 1, 0, 8],
+    &[9, 4, 3, 0, 0, 14, 2, 0, 9],
+    &[9, 4, 3, 1, 1, 14, 2, 0, 9],
+    &[7, 5, 0x82, 5, 0xfc, 3, 1],
+];
+fn observed_30d(data: &[u8], active: u8, manufacturer: &str, product: &str) -> bool {
+    if active != 1 || manufacturer != "Linux Foundation"
+        || product != "Multi Composite Double Uvc Gadget"
+        || data.len() != 0x3ed || !data.starts_with(D30_HEADER) {
+        return false;
+    }
+    let mut offset = D30_HEADER.len();
+    let mut matched = 0;
+    while offset < data.len() {
+        if offset + 2 > data.len() { return false; }
+        let n = data[offset] as usize;
+        if n < 3 || offset + n > data.len() { return false; }
+        let descriptor = &data[offset..offset+n];
+        if descriptor[1] != 0x24 {
+            if D30_TOPOLOGY.get(matched).copied() != Some(descriptor) { return false; }
+            matched += 1;
+        }
+        offset += n;
+    }
+    matched == D30_TOPOLOGY.len()
+}
+
+struct Candidate {
+    path: String,
+    active: u8,
+    descriptors: Vec<u8>,
+    manufacturer: String,
+    product: String,
+}
+fn classify(mut candidates: Vec<Candidate>) -> Result<Discovery> {
+    // Count before classification: a 30D alongside a 30B must not hide ambiguity.
+    if candidates.len() != 1 {
+        return Err(format!("expected one camera with the stock USB ID, found {}", candidates.len()).into());
+    }
+    let c = candidates.remove(0);
+    if observed_30d(&c.descriptors, c.active, &c.manufacturer, &c.product) {
+        return Ok(Discovery::Newer30d);
+    }
+    Ok(Discovery::Hid(Camera {
+        path: c.path,
+        interface: interface(&c.descriptors, c.active)?,
+        descriptors: c.descriptors,
+    }))
+}
+fn optional_string(path: &Path) -> Result<String> {
+    match read_bounded(path, 1024) {
+        Ok(data) => Ok(std::str::from_utf8(&data)?.trim_end_matches('\n').to_owned()),
+        Err(e) if e.downcast_ref::<std::io::Error>().is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound) => Ok(String::new()),
+        Err(e) => Err(e),
+    }
+}
+pub fn discover() -> Result<Discovery> {
     let mut cameras = Vec::new();
     for entry in fs::read_dir("/sys/bus/usb/devices")? {
         let p = entry?.path();
@@ -81,12 +157,15 @@ pub fn discover() -> Result<Camera> {
         let bus = number(&p.join("busnum"),10)?;
         let dev = number(&p.join("devnum"),10)?;
         if bus==0 || bus>999 || dev==0 || dev>127 { return Err("invalid USB bus/address".into()); }
-        let active=u8::try_from(number(&p.join("bConfigurationValue"),10)?)?;
-        let descriptors=read_bounded(&p.join("descriptors"), 65536)?;
-        cameras.push(Camera { path:format!("/dev/bus/usb/{bus:03}/{dev:03}"), interface:interface(&descriptors, active)?, descriptors });
+        cameras.push(Candidate {
+            path: format!("/dev/bus/usb/{bus:03}/{dev:03}"),
+            active: u8::try_from(number(&p.join("bConfigurationValue"),10)?)?,
+            descriptors: read_bounded(&p.join("descriptors"), 65536)?,
+            manufacturer: optional_string(&p.join("manufacturer"))?,
+            product: optional_string(&p.join("product"))?,
+        });
     }
-    if cameras.len()!=1 { return Err(format!("expected one supported camera, found {}", cameras.len()).into()); }
-    Ok(cameras.remove(0))
+    classify(cameras)
 }
 
 #[repr(C)]
@@ -179,6 +258,53 @@ mod tests {
         for (i,v) in [(8,0),(30,1),(32,14),(36,0),(39,2),(38,3),(45,0x84)] {
             let mut bad=d.clone(); bad[i]=v; assert!(interface(&bad,1).is_err(),"offset {i}");
         }
+    }
+    fn synthetic_30d() -> Candidate {
+        let mut data = D30_HEADER.to_vec();
+        for d in D30_TOPOLOGY { data.extend_from_slice(d); }
+        // Synthetic class-specific payloads: the classifier checks the standard
+        // USB topology, not the contents of video format/frame declarations.
+        while data.len() < 0x3ed {
+            let n = (0x3ed - data.len()).min(250);
+            assert!(n >= 3);
+            data.extend_from_slice(&[n as u8, 0x24, 0]);
+            data.resize(data.len() + n - 3, 0);
+        }
+        Candidate {
+            path: "/must/not/be/opened".into(), active: 1, descriptors: data,
+            manufacturer: "Linux Foundation".into(),
+            product: "Multi Composite Double Uvc Gadget".into(),
+        }
+    }
+    #[test]
+    fn newer_camera_is_classified_from_sysfs_only() {
+        assert!(matches!(classify(vec![synthetic_30d()]).unwrap(), Discovery::Newer30d));
+        assert!(classify(vec![]).is_err());
+        assert!(classify(vec![synthetic_30d(), synthetic_30d()]).is_err());
+        let old = Candidate { descriptors: descriptors(), ..synthetic_30d() };
+        assert!(matches!(classify(vec![old]).unwrap(), Discovery::Hid(_)));
+        let old = Candidate { descriptors: descriptors(), ..synthetic_30d() };
+        assert!(classify(vec![old, synthetic_30d()]).is_err());
+    }
+    #[test]
+    fn shared_ids_missing_hid_and_partial_matches_do_not_identify_30d() {
+        for offset in 0..111 {
+            let mut c = synthetic_30d();
+            c.descriptors[offset] ^= 1;
+            assert!(classify(vec![c]).is_err(), "changed standard descriptor byte {offset}");
+        }
+        for n in [0, 18, 27, 111, 1004] {
+            let mut c = synthetic_30d(); c.descriptors.truncate(n);
+            assert!(classify(vec![c]).is_err());
+        }
+        let mut c = synthetic_30d(); c.descriptors[111] = 0;
+        assert!(classify(vec![c]).is_err());
+        let mut c = synthetic_30d(); c.product = "USB Camera".into();
+        assert!(classify(vec![c]).is_err());
+        let mut c = synthetic_30d(); c.manufacturer.clear();
+        assert!(classify(vec![c]).is_err());
+        let mut c = synthetic_30d(); c.active = 2;
+        assert!(classify(vec![c]).is_err());
     }
     #[test]
     fn ioctl_abi() {
