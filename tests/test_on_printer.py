@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -24,7 +25,7 @@ class PayloadGenerationTests(unittest.TestCase):
         self.assertNotIn('@PAYLOADS@', data)
 
 
-@unittest.skipUnless(os.name == 'posix' and shutil.which('sh') and shutil.which('md5sum'), 'POSIX shell tools required')
+@unittest.skipUnless(sys.platform.startswith('linux') and shutil.which('sh') and shutil.which('md5sum'), 'Linux shell tools required')
 class CameraShellTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix='cc2-hid-test-')
@@ -133,3 +134,25 @@ preflight() { count=$((count+1)); if [ "$count" = 2 ]; then echo changed > "@CON
         self.assertNotEqual(result.returncode,0)
         self.assertIn('config-changing',result.stdout)
         self.assertFalse((self.config/'enabled').exists())
+
+    def test_verify_reads_active_correction_without_writing_config(self):
+        self.assertEqual(self.run_shell().returncode, 0)
+        symbols = self.root/'kallsyms'
+        symbols.write_text(''.join(f'{a:08x} T {n}\n' for n,a in generator.SYMBOLS.items()))
+        self.script = self.script.replace('/proc/kallsyms', str(symbols))
+        field = self.root/'field'
+        field.write_text('0x00001000\n')
+        cases = '\n'.join(f'{a:#x}) echo 0x{v:08X};;' for a,v in generator.INSTRUCTIONS.items())
+        wrapper = '#!/bin/sh\nif [ "$1" = devmem ]; then\n[ "$#" = 3 ] || exit 89\ncase "$2" in\n' + cases
+        wrapper += f'\n0x0043b190) echo 0x80450000;;\n{0x450010}) cat {field};;\n*) exit 1;;\nesac\nelse exec "$@"; fi\n'
+        (self.bin/'busybox').write_text(wrapper)
+        before = {str(p):p.read_bytes() for p in self.config.rglob('*') if p.is_file()}
+        result = self.run_shell('preflight; verify_live')
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertIn('STATUS=LIVE',result.stdout)
+        self.assertEqual(before,{str(p):p.read_bytes() for p in self.config.rglob('*') if p.is_file()})
+        field.write_text('0x00004000\n')
+        result = self.run_shell('preflight; verify_live')
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('fix-inactive',result.stdout)
+        self.assertEqual(before,{str(p):p.read_bytes() for p in self.config.rglob('*') if p.is_file()})

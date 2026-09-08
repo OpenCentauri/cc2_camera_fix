@@ -71,7 +71,7 @@ fn run() -> Result<()> {
     let mut random=[0u8;8];
     let prepared=if matches!(action,Action::Install|Action::Verify) {
         std::fs::File::open("/dev/urandom")?.read_exact(&mut random)?;
-        let token=random.iter().map(|b|format!("{b:02x}")).collect::<String>();
+        let token=format!("{:016x}", u64::from_be_bytes(random));
         let payload=script(&token,&action)?;
         Some((token,payload))
     } else { None };
