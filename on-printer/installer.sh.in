@@ -11,7 +11,16 @@ STAGE=/tmp/.cc2-hid-$TOKEN
 CONFIG=/etc/conf.d
 STATUS=FAIL
 
-fail() { echo "cc2camera-hid: $*"; exit 1; }
+fail() {
+    code=00
+    case "$1" in
+@FAIL_CASES@
+    esac
+    # Preserve the distinction between refusal and a partially written install.
+    case "$STATUS" in PART) STATUS=P$code;; *) STATUS=F$code;; esac
+    echo "cc2camera-hid: $*"
+    exit 1
+}
 mounted() {
     busybox awk '$2=="/etc/conf.d" {n++; if($1!="/dev/mtdblock5" || $3!="jffs2" || $4 !~ /(^|,)rw(,|$)/)bad=1} END {exit(n!=1 || bad)}' /proc/mounts
 }

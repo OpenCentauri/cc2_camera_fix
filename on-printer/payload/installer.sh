@@ -11,7 +11,49 @@ STAGE=/tmp/.cc2-hid-$TOKEN
 CONFIG=/etc/conf.d
 STATUS=FAIL
 
-fail() { echo "cc2camera-hid: $*"; exit 1; }
+fail() {
+    code=00
+    case "$1" in
+        chmod) code=01;;
+        config-changing) code=02;;
+        config-mount) code=03;;
+        config-path) code=04;;
+        config-read) code=05;;
+        copy) code=06;;
+        destination-appeared) code=07;;
+        enabled-path) code=08;;
+        final-missing) code=09;;
+        fix-inactive) code=10;;
+        hid-fingerprint) code=11;;
+        identity-file) code=12;;
+        incomplete-install) code=13;;
+        instructions) code=14;;
+        kernel-fingerprint) code=15;;
+        managed-link) code=16;;
+        missing-hooks) code=17;;
+        mkdir) code=18;;
+        mode) code=19;;
+        mount-topology) code=20;;
+        partition-map) code=21;;
+        pointer) code=22;;
+        pointer-changed) code=23;;
+        pointer-format) code=24;;
+        pointer-range) code=25;;
+        rename) code=26;;
+        root) code=27;;
+        staged-fix) code=28;;
+        staged-runner) code=29;;
+        symbols) code=30;;
+        sync) code=31;;
+        temporary-readback) code=32;;
+        unknown-managed-file) code=33;;
+        unrelated-hook-type) code=34;;
+    esac
+    # Preserve the distinction between refusal and a partially written install.
+    case "$STATUS" in PART) STATUS=P$code;; *) STATUS=F$code;; esac
+    echo "cc2camera-hid: $*"
+    exit 1
+}
 mounted() {
     busybox awk '$2=="/etc/conf.d" {n++; if($1!="/dev/mtdblock5" || $3!="jffs2" || $4 !~ /(^|,)rw(,|$)/)bad=1} END {exit(n!=1 || bad)}' /proc/mounts
 }

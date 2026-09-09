@@ -253,3 +253,23 @@ Firmware and persistent-write checks are unchanged. Polling tolerates that exact
 unavailable reply while the worker starts, within the existing 90-second deadline;
 it never treats it as success or retries an upload. Framing/CRC failures remain protocol errors. Synthetic transport
 tests check diagnostic contents, escaping, bounds and a single version query.
+
+## Worker refusal diagnostics
+
+Physical testing completed both staging uploads, launched the worker, and read
+a current-session `FAIL`. This establishes operation of the temporary status
+channel and a refusal before installation writes, but does not identify the
+failed check or establish successful installation. That attempt predates named
+failure diagnostics; its exact failed check cannot be recovered from `FAIL`.
+
+The worker encodes named failures as `Fnn` (before installation writes) or `Pnn`
+(after writes began). The shared `on-printer/failure-reasons.txt` catalog drives
+both shell generation and host decoding. A 16-digit token, colon and three-byte
+code fit in the 23-byte response. Unknown codes remain failures. Canonical hook
+contents and all camera checks are unchanged.
+
+`--verbose` records complete HID reports before reply validation, including
+padding and malformed bytes, plus transport errors. It adds no exchanges and
+never retries. It is a HID report log, not a capture of camera shell output or
+USB video traffic. Offline tests cover malformed replies, disabled logging,
+transport errors, consent, failure-stage preservation and stale session refusal.

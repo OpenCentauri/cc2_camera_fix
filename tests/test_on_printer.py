@@ -109,6 +109,17 @@ class CameraShellTests(unittest.TestCase):
             if kind == 'directory': version.rmdir()
             else: version.unlink()
 
+    def test_refusal_reports_specific_check_through_status_file(self):
+        version = self.status_setup()
+        # Observe the published terminal record before cleanup, without waiting.
+        (self.bin/'sleep').write_text('#!/bin/sh\ncat '+str(version)+'\n')
+        result = self.run_shell('prepare_status || exit 1; trap finish 0; fail kernel-fingerprint')
+        self.assertNotEqual(result.returncode, 0)
+        code = next(line.split()[0] for line in (ROOT/'on-printer/failure-reasons.txt').read_text().splitlines() if line.endswith(' kernel-fingerprint'))
+        self.assertIn('0123456789abcdef:F'+code, result.stdout)
+        self.assertFalse(version.exists())
+        self.assertFalse((self.config/'enabled').exists())
+
     def test_status_cleanup_preserves_unexpected_replacement(self):
         version = self.status_setup()
         version.write_text('original')
@@ -157,7 +168,8 @@ class CameraShellTests(unittest.TestCase):
         (self.bin/'cp').chmod(0o755)
         result=self.run_shell(modifications="trap 'echo STATUS=$STATUS' 0")
         self.assertNotEqual(result.returncode,0)
-        self.assertIn('STATUS=PART',result.stdout)
+        code = next(line.split()[0] for line in (ROOT/'on-printer/failure-reasons.txt').read_text().splitlines() if line.endswith(' copy'))
+        self.assertIn('STATUS=P'+code,result.stdout)
         self.assertFalse((self.config/'system.sh').exists())
         self.assertFalse((self.config/'enabled/10-erase-fix.sh').exists())
         self.assertTrue((self.config/'.cc2-hid-fix').exists())

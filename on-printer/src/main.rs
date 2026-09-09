@@ -22,6 +22,9 @@ libraries required by the static build. Only known camera firmware is supported.
       probe and verify the installed hooks and live RAM correction. No persistent
       file or RAM correction writes; temporary files/status are written in /tmp.
 
+Add --verbose to any command to log every full HID report in hex to stderr,
+including upload payloads, malformed replies and transport errors. No retries.
+
 Install/verify launch a camera shell script, temporarily replace its version
 response for two minutes, and leave its HID uploader unavailable until restart.
 Never retry after an error. A timeout does not cancel a camera-side installer.
@@ -40,6 +43,12 @@ fn arguments(args: &[String]) -> Result<Action> {
         _ => Err("unknown arguments; run --help".into()),
     }
 }
+fn options(args: &[String]) -> Result<(Action, bool)> {
+    let count = args.iter().filter(|a| a.as_str() == "--verbose").count();
+    if count > 1 { return Err("--verbose may only be specified once".into()); }
+    let filtered: Vec<String> = args.iter().filter(|a| a.as_str() != "--verbose").cloned().collect();
+    Ok((arguments(&filtered)?, count == 1))
+}
 fn script(token: &str, action: &Action) -> Result<(String, String, Vec<u8>)> {
     if token.len()!=16 || !token.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) {
         return Err("invalid local session token".into());
@@ -56,7 +65,20 @@ fn script(token: &str, action: &Action) -> Result<(String, String, Vec<u8>)> {
 fn terminal(payload: &[u8], token: &str, action: &Action) -> Result<bool> {
     let prefix=format!("{token}:");
     if !payload.starts_with(prefix.as_bytes()) { return Ok(false); }
-    match &payload[prefix.len()..] {
+    let state = &payload[prefix.len()..];
+    if state.len() == 3 && matches!(state[0], b'F' | b'P') && state[1..].iter().all(u8::is_ascii_digit) {
+        let code = std::str::from_utf8(&state[1..])?;
+        let reason = include_str!("../failure-reasons.txt").lines()
+            .filter_map(|line| line.split_once(' '))
+            .find(|(id, _)| *id == code).map(|(_, name)| name).unwrap_or("unknown-check");
+        let detail = if state[0] == b'F' {
+            "no persistent installation writes were started. Do not retry this boot."
+        } else {
+            "persistent writes began; outcome may be partial. Preserve power; do not retry or restart blindly."
+        };
+        return Err(format!("camera-side check failed: {reason} ({}); {detail}", String::from_utf8_lossy(state)).into());
+    }
+    match state {
         b"BUSY" => Ok(false),
         b"DONE" | b"SAME" if *action==Action::Install => Ok(true),
         b"LIVE" if *action==Action::Verify => Ok(true),
@@ -111,7 +133,7 @@ fn version_unavailable(status: u32, payload: &[u8]) -> bool {
 }
 fn run() -> Result<()> {
     // Parse consent and prepare every outgoing target before touching USB.
-    let action=arguments(&std::env::args().skip(1).collect::<Vec<_>>())?;
+    let (action, verbose)=options(&std::env::args().skip(1).collect::<Vec<_>>())?;
     if action==Action::Help { print!("{HELP}"); return Ok(()); }
     let mut random=[0u8;8];
     let prepared=if matches!(action,Action::Install|Action::Verify) {
@@ -122,7 +144,7 @@ fn run() -> Result<()> {
     } else { None };
     with_hid_camera(usb::discover()?, &action, |camera| {
     println!("Camera {}: HID interface {}, input 0x{:02x}, output {:?}",camera.path,camera.interface.number,camera.interface.input,camera.interface.output);
-    let mut transport=usb::Usb::open(camera)?;
+    let mut transport=protocol::Trace { inner: usb::Usb::open(camera)?, writer: std::io::stderr(), enabled: verbose };
     let version=query_version(&mut transport)?;
     match version {
         Some(version) => println!("Camera version: {}", String::from_utf8_lossy(&version)),
@@ -174,6 +196,31 @@ mod tests {
             });
             assert_eq!(result.is_ok(), action == Action::Inspect);
         }
+    }
+    #[test]
+    fn failure_codes_preserve_stage_and_require_current_session() {
+        for line in include_str!("../failure-reasons.txt").lines() {
+            let (code, reason) = line.split_once(' ').unwrap();
+            for (stage, message) in [("F", "no persistent installation writes"), ("P", "persistent writes began")] {
+                let payload = format!("0123456789abcdef:{stage}{code}");
+                assert!(payload.len() <= 23);
+                let error = terminal(payload.as_bytes(), "0123456789abcdef", &Action::Install).unwrap_err().to_string();
+                assert!(error.contains(reason) && error.contains(message), "{error}");
+                assert!(!terminal(payload.as_bytes(), "fedcba9876543210", &Action::Install).unwrap());
+            }
+        }
+        for state in ["F00", "P99", "F1", "F010", "Fxx"] {
+            assert!(terminal(format!("0123456789abcdef:{state}").as_bytes(), "0123456789abcdef", &Action::Install).is_err());
+        }
+    }
+    #[test]
+    fn verbose_preserves_consent_and_argument_refusals() {
+        assert_eq!(options(&args(&["--verbose", "inspect"])).unwrap(), (Action::Inspect, true));
+        assert_eq!(options(&args(&["inspect", "--verbose"])).unwrap(), (Action::Inspect, true));
+        assert_eq!(options(&args(&["install", ACCEPT, "--verbose"])).unwrap(), (Action::Install, true));
+        assert!(options(&args(&["install", "--verbose"])).is_err());
+        assert!(options(&args(&["inspect", "--verbose", "--verbose"])).is_err());
+        assert!(options(&args(&["inspect", "--unknown", "--verbose"])).is_err());
     }
     #[test]
     fn consent_and_unknown_arguments() {

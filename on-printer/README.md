@@ -196,3 +196,25 @@ create releases.
 
 See [implementation evidence and validation limits](../docs/ON-PRINTER-HID.md)
 for the protocol, accepted exception, and outstanding hardware checks.
+
+## Diagnostic logging
+
+Add `--verbose` to any command to log every complete outgoing and incoming HID
+report as hex on stderr, including padding, upload payloads and malformed replies.
+Transport errors are logged too. TX records describe an attempted exchange, not
+proof that the camera received it. Logging adds no queries or retries and does
+not capture video traffic or the camera process's stdout/stderr.
+
+```sh
+./cc2camera-hid inspect --verbose > /tmp/cc2camera-inspect.log 2>&1
+cat /tmp/cc2camera-inspect.log
+```
+
+Installation can also be logged with `install --accept-no-backup-space-risk
+--verbose`. Only run that operation under the installation prerequisites above;
+logging does not make it read-only or permit retrying in the same boot.
+
+Worker failures include the check name and a compact status code. `Fnn` means
+refusal before persistent installation writes; `Pnn` means writes had begun.
+Both are failures, and only a result carrying the current session token is
+accepted. Legacy `FAIL`/`PART` replies retain their failure meaning.

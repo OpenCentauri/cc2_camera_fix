@@ -4,6 +4,7 @@
 Python is required only on the development/build machine, never on the printer.
 """
 import hashlib
+import re
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -28,7 +29,9 @@ def generate():
         f'[ "$(busybox awk \'$3=="{n}" {{print $1}}\' /proc/kallsyms)" = "{a:08x}" ] || fail symbols'
         for n, a in SYMBOLS.items()
     )
+    reasons = [line.split() for line in (ROOT/'failure-reasons.txt').read_text().splitlines()]
     replacements = {
+        '@FAIL_CASES@': '\n'.join(f'        {name}) code={code};;' for code,name in reasons),
         '@KERNEL_MD5@': KERNEL_MD5,
         '@HID_MD5@': '8091751fdd4d0d50ea31901663797a86',
         '@MTD@': '\n'.join(f'mtd{i}: {size:08x} 00004000 "{name}"' for i, (name,size) in enumerate(EXPECTED_PARTITIONS)),
@@ -39,6 +42,13 @@ def generate():
     }
     script = (ROOT/'installer.sh.in').read_text()
     for key,value in replacements.items(): script=script.replace(key,value)
+    # Check only this worker and generated live checks, not the embedded hooks.
+    worker = (ROOT/'installer.sh.in').read_text() + checks
+    used = set(re.findall(r'\bfail ([a-z][a-z-]*)', worker))
+    if used != {name for _,name in reasons}:
+        raise ValueError('Worker failure-reasons.txt does not match fail sites')
+    if len({code for code,_ in reasons}) != len(reasons) or any(not re.fullmatch(r'[0-9]{2}', code) or code == '00' for code,_ in reasons):
+        raise ValueError('Failure codes must be unique two-digit values other than 00')
     return script
 
 if __name__ == '__main__':

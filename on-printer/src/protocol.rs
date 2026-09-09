@@ -50,6 +50,38 @@ pub trait Transport {
     fn exchange(&mut self, request: &[u8; SIZE]) -> Result<Vec<u8>>;
 }
 
+/// Logs complete HID reports before decoding, without adding exchanges or retries.
+pub struct Trace<T, W> {
+    pub inner: T,
+    pub writer: W,
+    pub enabled: bool,
+}
+fn dump(writer: &mut impl std::io::Write, direction: &str, bytes: &[u8]) -> std::io::Result<()> {
+    writeln!(writer, "HID {direction} len={}", bytes.len())?;
+    for (i, chunk) in bytes.chunks(16).enumerate() {
+        write!(writer, "{:04x}:", i * 16)?;
+        for byte in chunk { write!(writer, " {byte:02x}")?; }
+        writeln!(writer)?;
+    }
+    writer.flush()
+}
+impl<T: Transport, W: std::io::Write> Transport for Trace<T, W> {
+    fn exchange(&mut self, request: &[u8; SIZE]) -> Result<Vec<u8>> {
+        if self.enabled { dump(&mut self.writer, "TX attempt", request)?; }
+        let result = self.inner.exchange(request);
+        if self.enabled {
+            match &result {
+                Ok(reply) => dump(&mut self.writer, "RX", reply)?,
+                Err(error) => {
+                    writeln!(self.writer, "HID transport error: {:?}", error.to_string())?;
+                    self.writer.flush()?;
+                }
+            }
+        }
+        result
+    }
+}
+
 pub fn send(t: &mut impl Transport, command: u16, data: &[u8], kind: u8, seq: u32) -> Result<(u32, Vec<u8>)> {
     response(&t.exchange(&report(command, data, kind, seq)?)?, command)
 }
@@ -82,6 +114,32 @@ pub fn upload(t: &mut impl Transport, path: &[u8], data: &[u8], launch: bool) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn trace_preserves_full_reports_and_errors_without_extra_exchanges() {
+        struct Reply { bytes: Vec<u8>, calls: usize, fail: bool }
+        impl Transport for Reply {
+            fn exchange(&mut self, _: &[u8; SIZE]) -> Result<Vec<u8>> {
+                self.calls += 1;
+                if self.fail { Err("injected failure".into()) } else { Ok(self.bytes.clone()) }
+            }
+        }
+        for enabled in [false, true] {
+            for fail in [false, true] {
+                // Deliberately malformed: trace must include bytes before decoding.
+                let bytes = vec![0xff, 0, 0x1b];
+                let mut t = Trace { inner: Reply { bytes, calls: 0, fail }, writer: Vec::new(), enabled };
+                assert!(send(&mut t, 1, &[], 1, 0).is_err());
+                assert_eq!(t.inner.calls, 1);
+                let log = String::from_utf8(t.writer).unwrap();
+                if enabled {
+                    assert!(log.contains("HID TX attempt len=1024"));
+                    assert!(log.contains("03f0:"), "padding must not be omitted");
+                    assert!(log.contains(if fail { "injected failure" } else { "HID RX len=3\n0000: ff 00 1b" }));
+                    assert!(!log.contains('\x1b'));
+                } else { assert!(log.is_empty()); }
+            }
+        }
+    }
     #[test]
     fn frames_and_corruption() {
         assert_eq!(crc(b"123456789".iter().copied()), 0x1dba);
