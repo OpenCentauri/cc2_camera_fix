@@ -28,9 +28,36 @@ class CliTests(unittest.TestCase):
         import argparse
         action = next(a for a in cli.parser()._actions if isinstance(a, argparse._SubParsersAction))
         self.assertEqual(set(action.choices), {
-            "devices", "device-info", "start-adb", "install-adb-startup",
+            "devices", "device-info", "identify-camera", "start-adb", "install-adb-startup",
             "backup", "inspect-image", "build-image", "restore", "install-erase-fix",
         })
+
+    def test_identify_camera_is_read_only_and_reports_known_family(self):
+        fingerprint = cli.stream_identify.JpegFingerprint(
+            640, 360, ((1, 2, 2), (2, 1, 1), (3, 1, 1)),
+            ("DQT", "DQT", "SOF0", "DHT", "DHT", "DHT", "DHT", "SOS"),
+            "13660d69eacf5a054bdf3d88d8aead55e5857f704b6f3d9fa098ca93ecf9c44b",
+            None, None, 0,
+        )
+        result = cli.stream_identify.CameraIdentification(
+            "EF-S7-V1.0.30B", fingerprint, 3
+        )
+        with mock.patch.object(cli.stream_identify, "identify_camera_stream", return_value=result) as identify, mock.patch.object(cli, "_adb") as adb, mock.patch.object(cli, "expected_devices") as hid, redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(cli.main(["identify-camera", "printer.local"]), 0)
+        identify.assert_called_once_with("printer.local", timeout=5.0)
+        adb.assert_not_called()
+        hid.assert_not_called()
+        self.assertIn("EF-S7-V1.0.30B", output.getvalue())
+        self.assertIn("read-only identification aid", output.getvalue())
+
+    def test_identify_camera_refuses_unknown_signature(self):
+        fingerprint = cli.stream_identify.JpegFingerprint(
+            1, 1, (), (), "0" * 64, None, None, 0
+        )
+        result = cli.stream_identify.CameraIdentification(None, fingerprint, 3)
+        with mock.patch.object(cli.stream_identify, "identify_camera_stream", return_value=result), redirect_stderr(io.StringIO()) as error:
+            self.assertEqual(cli.main(["identify-camera", "printer.local"]), 2)
+        self.assertIn("not recognized", error.getvalue())
 
     def test_image_defaults_and_repeatable_reads(self):
         args = cli.parser().parse_args(["build-image", "one.bin", "--confirm-read", "two.bin", "--confirm-read", "three.bin"])
