@@ -1,3 +1,19 @@
+# Exploration build — do not merge or release
+
+This branch implements the developer-authorized temporary exception to replace
+only an existing regular mode-755 `enabled/10-erase-fix.sh` with different contents.
+Use `install --accept-experimental-erase-hook-replacement --verbose`.
+The old hook is copied to camera RAM at `/tmp/.cc2-old-erase-hook-<session>` and
+retained for this boot; this is not an exported or durable backup. Replacement
+uses a checked temporary file and rename, checks the old file against that copy,
+and verifies the final canonical bytes. An unknown starter remains refused.
+Verification remains strict. There is no space admission or automatic reboot.
+This exception is not intended for the final tool or PR #19.
+
+The inherited guide below describes the normal tool; its install consent flag
+is intentionally rejected by this exploration build. All other prerequisites
+and hardware recovery risks still apply.
+
 # Install the camera fix from a CC2 shell
 
 `cc2camera-hid` is an **experimental, hardware-unverified** way to protect a

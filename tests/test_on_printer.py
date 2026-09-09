@@ -59,7 +59,7 @@ class CameraShellTests(unittest.TestCase):
             if path == '/dev/mtd1': script=script.replace(generator.KERNEL_MD5,hashlib.md5(content).hexdigest())
             if path == '/bin/hid_update': script=script.replace('8091751fdd4d0d50ea31901663797a86',hashlib.md5(content).hexdigest())
         script = script.replace('/etc/conf.d',str(self.config)).replace('/proc/mounts',str(mounts)).replace('/proc/mtd',str(mtd))
-        self.script = script + f'\nSTAGE={self.stage}\n'
+        self.script = script + f'\nSTAGE={self.stage}\nOLD_HOOK={self.root}/old-hook\n'
 
     def run_shell(self, command='preflight; install_files', modifications=''):
         result = subprocess.run(['sh'], input=self.script+modifications+'\n'+command+'\nprintf "STATUS=%s\\n" "$STATUS"\n', text=True, capture_output=True, timeout=10)
@@ -141,6 +141,55 @@ class CameraShellTests(unittest.TestCase):
         result = self.run_shell()
         self.assertIn('STATUS=SAME',result.stdout)
         self.assertEqual(before,[(p.stat().st_mtime_ns,p.read_bytes()) for p in paths])
+
+    def test_experiment_replaces_only_hook_and_preserves_ram_copy(self):
+        hook = self.config/'enabled/10-erase-fix.sh'
+        hook.parent.mkdir()
+        hook.write_bytes(b'previous experimental hook\n')
+        hook.chmod(0o755)
+        starter = self.config/'system.sh'
+        starter.write_bytes(generator.RUNNER)
+        starter.chmod(0o755)
+        before = starter.stat().st_mtime_ns
+        result = self.run_shell(modifications='REPLACE_ERASE_HOOK=1')
+        self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
+        self.assertIn('STATUS=DONE', result.stdout)
+        self.assertEqual(hook.read_bytes(), generator.erase_hook())
+        self.assertEqual((self.root/'old-hook').read_bytes(), b'previous experimental hook\n')
+        self.assertEqual(starter.stat().st_mtime_ns, before)
+        self.assertEqual(starter.read_bytes(), generator.RUNNER)
+        hook.write_bytes(b'different again')
+        result = self.run_shell('verify_live', modifications='MODE=verify; REPLACE_ERASE_HOOK=1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('erase-hook-content', result.stdout)
+
+    def test_experiment_refuses_unknown_starter_before_replacing_hook(self):
+        hook = self.config/'enabled/10-erase-fix.sh'
+        hook.parent.mkdir()
+        hook.write_bytes(b'old hook')
+        hook.chmod(0o755)
+        starter = self.config/'system.sh'
+        starter.write_bytes(b'unknown starter')
+        starter.chmod(0o755)
+        result = self.run_shell(modifications='REPLACE_ERASE_HOOK=1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('starter-content', result.stdout)
+        self.assertEqual(hook.read_bytes(), b'old hook')
+        self.assertFalse((self.root/'old-hook').exists())
+
+    def test_experimental_partial_copy_preserves_old_hook(self):
+        hook = self.config/'enabled/10-erase-fix.sh'
+        hook.parent.mkdir()
+        hook.write_bytes(b'old hook')
+        hook.chmod(0o755)
+        wrapper = '#!/bin/sh\ncase "$2" in */.cc2-hid-fix) printf truncated > "$2"; exit 1;; esac\nexec /bin/cp "$@"\n'
+        (self.bin/'cp').write_text(wrapper)
+        (self.bin/'cp').chmod(0o755)
+        result = self.run_shell(modifications='REPLACE_ERASE_HOOK=1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(hook.read_bytes(), b'old hook')
+        self.assertEqual((self.root/'old-hook').read_bytes(), b'old hook')
+        self.assertFalse((self.config/'system.sh').exists())
 
     def test_canonical_starter_is_preserved_while_missing_hook_is_installed(self):
         starter = self.config/'system.sh'

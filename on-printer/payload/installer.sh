@@ -10,6 +10,8 @@ SELF=/tmp/.cc2-hid-$TOKEN.sh
 STAGE=/tmp/.cc2-hid-$TOKEN
 CONFIG=/etc/conf.d
 STATUS=FAIL
+REPLACE_ERASE_HOOK=0
+OLD_HOOK=/tmp/.cc2-old-erase-hook-$TOKEN
 
 fail() {
     code=00
@@ -145,7 +147,9 @@ known_or_absent() {
         comparison=$?
         case "$comparison" in
             0) ;;
-            1) managed_failure content;;
+            1)
+                [ "$REPLACE_ERASE_HOOK" = 1 ] && [ "$MODE" = install ] && [ "$dest" = "$CONFIG/enabled/10-erase-fix.sh" ] || managed_failure content
+                ;;
             *) managed_failure compare;;
         esac
     fi
@@ -154,7 +158,7 @@ install_files() {
     # Validate both destinations before the first persistent write.
     known_or_absent "$CONFIG/enabled/10-erase-fix.sh" "$STAGE/fix"
     known_or_absent "$CONFIG/system.sh" "$STAGE/runner"
-    if [ -e "$CONFIG/enabled/10-erase-fix.sh" ] && [ -e "$CONFIG/system.sh" ]; then
+    if [ -e "$CONFIG/enabled/10-erase-fix.sh" ] && [ -e "$CONFIG/system.sh" ] && busybox cmp -s "$STAGE/fix" "$CONFIG/enabled/10-erase-fix.sh"; then
         STATUS=SAME
         return
     fi
@@ -170,32 +174,44 @@ install_files() {
     known_or_absent "$CONFIG/enabled/10-erase-fix.sh" "$STAGE/fix"
     known_or_absent "$CONFIG/system.sh" "$STAGE/runner"
     [ "$(busybox md5sum /dev/mtd5)" = "$baseline" ] || fail config-changing
+    if [ "$REPLACE_ERASE_HOOK" = 1 ] && [ -e "$CONFIG/enabled/10-erase-fix.sh" ]; then
+        [ ! -e "$OLD_HOOK" ] && [ ! -L "$OLD_HOOK" ] || fail incomplete-install
+        cp -p "$CONFIG/enabled/10-erase-fix.sh" "$OLD_HOOK" || fail copy
+        busybox cmp -s "$OLD_HOOK" "$CONFIG/enabled/10-erase-fix.sh" || fail config-changing
+    fi
     STATUS=PART
     mkdir -p "$CONFIG/enabled" || fail mkdir
-    # Feature first, boot entry point last. Never overwrite an existing hook.
+    # Experimental build: only the erase hook may be replaced; runner stays strict.
     for n in fix runner; do
         case "$n" in
             fix) dest=$CONFIG/enabled/10-erase-fix.sh;;
             runner) dest=$CONFIG/system.sh;;
         esac
         known_or_absent "$dest" "$STAGE/$n"
-        if [ -e "$dest" ]; then continue; fi
+        if [ -e "$dest" ] && busybox cmp -s "$STAGE/$n" "$dest"; then continue; fi
         temp=$CONFIG/.cc2-hid-$n
         [ ! -e "$temp" ] && [ ! -L "$temp" ] || fail incomplete-install
         cp "$STAGE/$n" "$temp" || fail copy
         chmod 755 "$temp" || fail chmod
         busybox cmp -s "$STAGE/$n" "$temp" || fail temporary-readback
         sync || fail sync
-        [ ! -e "$dest" ] && [ ! -L "$dest" ] || fail destination-appeared
+        if [ -e "$dest" ]; then
+            [ "$REPLACE_ERASE_HOOK" = 1 ] && [ "$n" = fix ] && regular "$dest" && [ "$(busybox stat -c %a "$dest")" = 755 ] || fail destination-appeared
+            busybox cmp -s "$OLD_HOOK" "$dest" || fail config-changing
+        else
+            [ ! -L "$dest" ] || fail destination-appeared
+        fi
         mv "$temp" "$dest" || fail rename
         sync || fail sync
     done
+    REPLACE_ERASE_HOOK=0
     known_or_absent "$CONFIG/enabled/10-erase-fix.sh" "$STAGE/fix"
     known_or_absent "$CONFIG/system.sh" "$STAGE/runner"
     regular "$CONFIG/enabled/10-erase-fix.sh" && regular "$CONFIG/system.sh" || fail final-missing
     STATUS=DONE
 }
 verify_live() {
+    REPLACE_ERASE_HOOK=0
     known_or_absent "$CONFIG/enabled/10-erase-fix.sh" "$STAGE/fix"
     known_or_absent "$CONFIG/system.sh" "$STAGE/runner"
     regular "$CONFIG/enabled/10-erase-fix.sh" && regular "$CONFIG/system.sh" || fail missing-hooks
@@ -334,7 +350,7 @@ CC2_PAYLOAD_END
     [ "$(busybox md5sum "$STAGE/fix")" = 'c6d5dd18094e9e65fc42e9afa2f40c24  '"$STAGE/fix" ] || fail staged-fix
     [ "$(busybox md5sum "$STAGE/runner")" = '057670efd1488e00ec5f3ecfd6343748  '"$STAGE/runner" ] || fail staged-runner
     case "$MODE" in
-        install) install_files;;
+        install) REPLACE_ERASE_HOOK=1; install_files;;
         verify) verify_live;;
         *) fail mode;;
     esac

@@ -56,7 +56,7 @@ jobs:
             dist/cc2camera-hid-armv7-linux.sha256
           if-no-files-found: error
   attach:
-    if: github.event_name == 'release'
+    if: false # Exploration binaries must never be release assets
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 5

@@ -3,8 +3,10 @@ mod usb;
 use std::{io::Read, time::{Duration, Instant}};
 use protocol::{send, upload};
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-const ACCEPT: &str = "--accept-no-backup-space-risk";
-const HELP: &str = "cc2camera-hid: experimental prevention for a working stock CC2 camera
+const ACCEPT: &str = "--accept-experimental-erase-hook-replacement";
+const HELP: &str = "cc2camera-hid: EXPLORATION BUILD — erase-hook replacement; not for release
+
+experimental prevention for a working stock CC2 camera
 
 Run as root on an idle printer. ARMv7 Linux; no Python, ADB, hidraw or shared
 libraries required by the static build. Only known camera firmware is supported.
@@ -12,7 +14,7 @@ libraries required by the static build. Only known camera firmware is supported.
   cc2camera-hid inspect
       Read USB descriptors; query the version only for a supported HID camera.
       Recognized 30D signatures need no patch and receive no camera commands.
-  cc2camera-hid install --accept-no-backup-space-risk
+  cc2camera-hid install --accept-experimental-erase-hook-replacement
       Install the persistent erase-fix hook through HID. NO BACKUP is exported,
       and safe clean space is NOT checked. A failed write or power loss can leave
       the camera unbootable and require an external SPI programmer to recover.
@@ -151,7 +153,8 @@ fn run() -> Result<()> {
         None => println!("Camera version unavailable (status 1, empty reply). HID communication works; firmware compatibility is not yet verified."),
     }
     if let Some((token,(path,launch,data)))=prepared {
-        if action==Action::Install { println!("Accepted: no exported backup or clean-space check; programmer recovery may be required."); }
+        if action==Action::Install { println!("EXPERIMENT: replacing an existing erase hook is allowed. No exported backup or clean-space check; programmer recovery may be required."); }
+        if action==Action::Install { println!("Old hook, if present, will be saved in camera RAM at /tmp/.cc2-old-erase-hook-{token}; lost on camera reboot."); }
         println!("Uploading temporary camera worker; session {token}. Do not interrupt power.");
         upload(&mut transport,path.as_bytes(),&data,false)?;
         upload(&mut transport,launch.as_bytes(),b"\n",true)?;
