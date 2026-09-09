@@ -146,8 +146,9 @@ version file is restored two minutes after the worker finishes; if it was absent
 the newly created file is removed. Status records are published by rename so a
 query cannot observe a partially written record. Unexpected replacements are
 preserved along with staging diagnostics. This behavior
-has been observed for session-bound results; cleanup timing and its effect on
-printer software have not been independently confirmed.
+has been observed for session-bound results, and the developer confirmed normal
+camera-feed operation after installation and verification. Cleanup timing has
+not been independently confirmed.
 
 The first staging upload precedes camera-side checks. It relies on the analyzed
 stock `/tmp` layout and a fresh random destination; the worker then requires
@@ -213,8 +214,9 @@ binary at commit `ce33161c3a02a7e242cfe313d69c549bd97a96f0`:
 This is physical evidence for installation and subsequent live verification
 through the printer's USB HID transport on the tested, previously modified 30B.
 It is not an independent full-flash readback, a clean stock-camera installation
-test, or an erase-pressure/endurance test. Normal camera-feed behavior and the
-status-file cleanup timing have not been separately reported. The route remains
+test, or an erase-pressure/endurance test. The developer also confirmed that the
+camera feed works normally after installation and verification. Status-file
+cleanup timing has not been separately confirmed. The route remains
 experimental and retains its no-backup/no-space-admission risks.
 
 Earlier testing after a printer shell `reboot` timed out on the first upload
