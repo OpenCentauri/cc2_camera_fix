@@ -273,3 +273,15 @@ padding and malformed bytes, plus transport errors. It adds no exchanges and
 never retries. It is a HID report log, not a capture of camera shell output or
 USB video traffic. Offline tests cover malformed replies, disabled logging,
 transport errors, consent, failure-stage preservation and stale session refusal.
+
+After a physical power cycle, the developer observed a complete upload and a
+current-session `F33` (`unknown-managed-file`) refusal. This passed the initial
+firmware/partition/mount checks, but the combined file check does not reveal
+which managed path, file type, permissions or comparison condition failed.
+The attached ADB-repaired image contains an older ADB-only `system.sh`; the
+developer clarified that it is not a current snapshot and expects the live
+camera to contain the canonical enabled-script starter. The image therefore
+cannot diagnose the current refusal. Path-specific checks now distinguish file
+type, stat failure, mode mismatch, content mismatch and comparison-tool failure.
+Offline tests cover absent-file installation and preservation of a canonical
+starter when adding a missing erase hook; these are not new compatibility cases.

@@ -48,6 +48,16 @@ fail() {
         temporary-readback) code=32;;
         unknown-managed-file) code=33;;
         unrelated-hook-type) code=34;;
+        starter-type) code=35;;
+        starter-stat) code=36;;
+        starter-mode) code=37;;
+        starter-content) code=38;;
+        starter-compare) code=39;;
+        erase-hook-type) code=40;;
+        erase-hook-stat) code=41;;
+        erase-hook-mode) code=42;;
+        erase-hook-content) code=43;;
+        erase-hook-compare) code=44;;
     esac
     # Preserve the distinction between refusal and a partially written install.
     case "$STATUS" in PART) STATUS=P$code;; *) STATUS=F$code;; esac
@@ -108,12 +118,36 @@ mtd5: 00020000 00004000 "config"' ] || fail partition-map
         regular "$hook" || fail unrelated-hook-type
     done
 }
+managed_failure() {
+    case "$dest:$1" in
+        "$CONFIG/system.sh:type") fail starter-type;;
+        "$CONFIG/system.sh:stat") fail starter-stat;;
+        "$CONFIG/system.sh:mode") fail starter-mode;;
+        "$CONFIG/system.sh:content") fail starter-content;;
+        "$CONFIG/system.sh:compare") fail starter-compare;;
+        "$CONFIG/enabled/10-erase-fix.sh:type") fail erase-hook-type;;
+        "$CONFIG/enabled/10-erase-fix.sh:stat") fail erase-hook-stat;;
+        "$CONFIG/enabled/10-erase-fix.sh:mode") fail erase-hook-mode;;
+        "$CONFIG/enabled/10-erase-fix.sh:content") fail erase-hook-content;;
+        "$CONFIG/enabled/10-erase-fix.sh:compare") fail erase-hook-compare;;
+        *) fail unknown-managed-file;;
+    esac
+}
 known_or_absent() {
     dest=$1
     source=$2
     [ ! -L "$dest" ] || fail managed-link
     if [ -e "$dest" ]; then
-        regular "$dest" && [ "$(busybox stat -c %a "$dest")" = 755 ] && busybox cmp -s "$source" "$dest" || fail unknown-managed-file
+        regular "$dest" || managed_failure type
+        permissions=$(busybox stat -c %a "$dest") || managed_failure stat
+        [ "$permissions" = 755 ] || managed_failure mode
+        busybox cmp -s "$source" "$dest"
+        comparison=$?
+        case "$comparison" in
+            0) ;;
+            1) managed_failure content;;
+            *) managed_failure compare;;
+        esac
     fi
 }
 install_files() {

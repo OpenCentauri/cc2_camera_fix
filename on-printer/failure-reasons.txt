@@ -32,3 +32,13 @@
 32 temporary-readback
 33 unknown-managed-file
 34 unrelated-hook-type
+35 starter-type
+36 starter-stat
+37 starter-mode
+38 starter-content
+39 starter-compare
+40 erase-hook-type
+41 erase-hook-stat
+42 erase-hook-mode
+43 erase-hook-content
+44 erase-hook-compare

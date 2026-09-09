@@ -142,6 +142,41 @@ class CameraShellTests(unittest.TestCase):
         self.assertIn('STATUS=SAME',result.stdout)
         self.assertEqual(before,[(p.stat().st_mtime_ns,p.read_bytes()) for p in paths])
 
+    def test_canonical_starter_is_preserved_while_missing_hook_is_installed(self):
+        starter = self.config/'system.sh'
+        starter.write_bytes(generator.RUNNER)
+        starter.chmod(0o755)
+        before = (starter.read_bytes(), starter.stat().st_mtime_ns)
+        result = self.run_shell()
+        self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
+        self.assertIn('STATUS=DONE', result.stdout)
+        self.assertEqual((starter.read_bytes(), starter.stat().st_mtime_ns), before)
+        self.assertEqual((self.config/'enabled/10-erase-fix.sh').read_bytes(), generator.erase_hook())
+
+    def test_managed_file_diagnostics_distinguish_paths_modes_and_comparison_errors(self):
+        for relative, label, expected in [('system.sh', 'starter', generator.RUNNER), ('enabled/10-erase-fix.sh', 'erase-hook', generator.erase_hook())]:
+            dest = self.config/relative
+            dest.parent.mkdir(exist_ok=True)
+            for kind in ['type', 'stat', 'mode', 'content', 'compare']:
+                with self.subTest(path=relative, failure=kind):
+                    if kind == 'type': dest.mkdir()
+                    else:
+                        dest.write_bytes(b'unknown' if kind == 'content' else expected)
+                        dest.chmod(0o644 if kind == 'mode' else 0o755)
+                    wrapper = '#!/bin/sh\n'
+                    if kind in ('stat', 'compare'):
+                        applet = 'stat' if kind == 'stat' else 'cmp'
+                        wrapper += f'[ "$1" = {applet} ] && exit 2\n'
+                    (self.bin/'busybox').write_text(wrapper+'exec "$@"\n')
+                    before = {str(p):p.read_bytes() for p in self.config.rglob('*') if p.is_file()}
+                    result = self.run_shell('install_files')
+                    self.assertNotEqual(result.returncode, 0, result.stdout+result.stderr)
+                    self.assertIn(label+'-'+kind, result.stdout)
+                    self.assertEqual(before, {str(p):p.read_bytes() for p in self.config.rglob('*') if p.is_file()})
+                    if kind == 'type': dest.rmdir()
+                    else: dest.unlink()
+            (self.bin/'busybox').write_text('#!/bin/sh\nexec "$@"\n')
+
     def test_unknown_hook_or_symlink_never_writes(self):
         dest = self.config/'system.sh'
         for link in (False, True):

@@ -70,12 +70,36 @@ preflight() {
         regular "$hook" || fail unrelated-hook-type
     done
 }
+managed_failure() {
+    case "$dest:$1" in
+        "$CONFIG/system.sh:type") fail starter-type;;
+        "$CONFIG/system.sh:stat") fail starter-stat;;
+        "$CONFIG/system.sh:mode") fail starter-mode;;
+        "$CONFIG/system.sh:content") fail starter-content;;
+        "$CONFIG/system.sh:compare") fail starter-compare;;
+        "$CONFIG/enabled/10-erase-fix.sh:type") fail erase-hook-type;;
+        "$CONFIG/enabled/10-erase-fix.sh:stat") fail erase-hook-stat;;
+        "$CONFIG/enabled/10-erase-fix.sh:mode") fail erase-hook-mode;;
+        "$CONFIG/enabled/10-erase-fix.sh:content") fail erase-hook-content;;
+        "$CONFIG/enabled/10-erase-fix.sh:compare") fail erase-hook-compare;;
+        *) fail unknown-managed-file;;
+    esac
+}
 known_or_absent() {
     dest=$1
     source=$2
     [ ! -L "$dest" ] || fail managed-link
     if [ -e "$dest" ]; then
-        regular "$dest" && [ "$(busybox stat -c %a "$dest")" = 755 ] && busybox cmp -s "$source" "$dest" || fail unknown-managed-file
+        regular "$dest" || managed_failure type
+        permissions=$(busybox stat -c %a "$dest") || managed_failure stat
+        [ "$permissions" = 755 ] || managed_failure mode
+        busybox cmp -s "$source" "$dest"
+        comparison=$?
+        case "$comparison" in
+            0) ;;
+            1) managed_failure content;;
+            *) managed_failure compare;;
+        esac
     fi
 }
 install_files() {

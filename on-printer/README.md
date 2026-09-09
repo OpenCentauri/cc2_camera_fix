@@ -218,3 +218,11 @@ Worker failures include the check name and a compact status code. `Fnn` means
 refusal before persistent installation writes; `Pnn` means writes had begun.
 Both are failures, and only a result carrying the current session token is
 accepted. Legacy `FAIL`/`PART` replies retain their failure meaning.
+
+Missing managed files are allowed: a stock camera need not already have
+`/etc/conf.d/system.sh` or `enabled/10-erase-fix.sh`. An existing canonical
+starter with mode 755 is preserved, including when the erase hook is absent.
+Managed-file failures identify `starter` (`system.sh`) or `erase-hook`, followed
+by `type`, `stat`, `mode`, `content`, or `compare`. `content` means `cmp` reported
+different bytes; `compare` means the comparison command failed. These diagnostics
+do not authorize overwriting existing files.
