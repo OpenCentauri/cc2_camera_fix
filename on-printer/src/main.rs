@@ -80,6 +80,30 @@ fn with_hid_camera(
         usb::Discovery::Hid(camera) => use_camera(camera),
     }
 }
+/// Send only the read-only version query; reject before any upload on failure.
+fn query_version(transport: &mut impl protocol::Transport) -> Result<Vec<u8>> {
+    let (status, version) = send(transport, 1, &[], 1, 0)?;
+    let reason = if status != 0 {
+        Some("camera returned a nonzero status")
+    } else if version.is_empty() {
+        Some("empty version payload")
+    } else if version.len() > 23 {
+        Some("version payload exceeds 23 bytes")
+    } else if !version.iter().all(|b| (0x20..=0x7e).contains(b)) {
+        Some("version payload contains non-printable bytes")
+    } else {
+        None
+    };
+    if let Some(reason) = reason {
+        let preview = &version[..version.len().min(64)];
+        return Err(format!(
+            "invalid camera version response: {reason}; command=0x0001; status={status} (0x{status:08x}); payload_len={}; escaped=\"{}\"; hex={:02x?}{}. No upload was started.",
+            version.len(), preview.escape_ascii(), preview,
+            if preview.len() < version.len() { " (preview truncated to 64 bytes)" } else { "" }
+        ).into());
+    }
+    Ok(version)
+}
 fn run() -> Result<()> {
     // Parse consent and prepare every outgoing target before touching USB.
     let action=arguments(&std::env::args().skip(1).collect::<Vec<_>>())?;
@@ -94,10 +118,7 @@ fn run() -> Result<()> {
     with_hid_camera(usb::discover()?, &action, |camera| {
     println!("Camera {}: HID interface {}, input 0x{:02x}, output {:?}",camera.path,camera.interface.number,camera.interface.input,camera.interface.output);
     let mut transport=usb::Usb::open(camera)?;
-    let (status,version)=send(&mut transport,1,&[],1,0)?;
-    if status!=0 || version.is_empty() || version.len()>23 || !version.iter().all(|b| (0x20..=0x7e).contains(b)) {
-        return Err("invalid camera version response".into());
-    }
+    let version=query_version(&mut transport)?;
     println!("Camera version: {}",String::from_utf8_lossy(&version));
     if let Some((token,(path,launch,data)))=prepared {
         if action==Action::Install { println!("Accepted: no exported backup or clean-space check; programmer recovery may be required."); }
@@ -167,4 +188,50 @@ mod tests {
             assert!(terminal(format!("0123456789abcdef:{status}").as_bytes(),"0123456789abcdef",&Action::Install).is_err());
         }
     }
+    struct VersionReply { status: u32, payload: Vec<u8>, calls: usize }
+    impl protocol::Transport for VersionReply {
+        fn exchange(&mut self, request: &[u8; protocol::SIZE]) -> Result<Vec<u8>> {
+            assert_eq!(*request, protocol::report(1, &[], 1, 0)?,
+                "diagnostics must never send an upload or other camera command");
+            self.calls += 1;
+            Ok(protocol::report(1, &self.payload, 1, self.status)?.to_vec())
+        }
+    }
+    #[test]
+    fn version_diagnostics_preserve_refusals_and_send_only_one_read_query() {
+        for (status, payload, reason) in [
+            (1, vec![], "nonzero status"),
+            (0, vec![], "empty version payload"),
+            (0, vec![b'x'; 24], "exceeds 23 bytes"),
+            (0, vec![b'A', 0, 10, 13, 27, 255], "non-printable bytes"),
+        ] {
+            let mut t = VersionReply { status, payload: payload.clone(), calls: 0 };
+            let error = query_version(&mut t).unwrap_err().to_string();
+            assert!(error.contains(reason), "{error}");
+            assert!(error.contains(&format!("status={status} (0x{status:08x})")));
+            assert!(error.contains(&format!("payload_len={}", payload.len())));
+            assert!(error.contains("escaped=\""));
+            assert!(error.contains("hex=["));
+            assert!(error.contains("No upload was started."));
+            assert!(!error.bytes().any(|b| b < 0x20 || b > 0x7e));
+            assert_eq!(t.calls, 1);
+        }
+        let mut t = VersionReply { status: 0, payload: b"1.0.30B".to_vec(), calls: 0 };
+        assert_eq!(query_version(&mut t).unwrap(), b"1.0.30B");
+        assert_eq!(t.calls, 1);
+    }
+    #[test]
+    fn diagnostic_preview_is_bounded_and_control_bytes_are_escaped() {
+        let mut t = VersionReply { status: 0, payload: vec![0, 10, 13, 27, 255], calls: 0 };
+        let error = query_version(&mut t).unwrap_err().to_string();
+        assert!(error.contains(r#"escaped="\x00\n\r\x1b\xff""#), "{error}");
+        assert!(error.contains("hex=[00, 0a, 0d, 1b, ff]"), "{error}");
+        let mut t = VersionReply { status: 0, payload: vec![255; protocol::CHUNK], calls: 0 };
+        let error = query_version(&mut t).unwrap_err().to_string();
+        assert!(error.contains("payload_len=1010"));
+        assert!(error.contains("preview truncated to 64 bytes"));
+        assert!(error.len() < 1024);
+        assert_eq!(t.calls, 1);
+    }
+
 }

@@ -87,6 +87,12 @@ firmware: the camera-side installer checks fingerprints before persistent writes
 Stop if inspection reports an error, multiple cameras, or bootloader mode.
 Do not manually unbind arbitrary USB drivers to bypass a refusal.
 
+If the version reply fails validation, the error includes its status, payload
+length, and escaped text/hex bytes (at most 64 bytes of preview). Paste that
+diagnostic when reporting an inspection failure. Control bytes are escaped so
+they cannot act as terminal commands. The version check still refuses the
+operation before any upload; these diagnostics do not bypass validation.
+
 ## Install, then verify after restart
 
 The following command **can write the camera's persistent configuration**.

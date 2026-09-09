@@ -206,3 +206,40 @@ The existing hook's physical evidence in
 [STARTUP-HOOKS-VALIDATION.md](STARTUP-HOOKS-VALIDATION.md) does not validate this
 new transport, installer, or otherwise-stock hook-only boot behavior. User
 instructions therefore label this route experimental and hardware-unverified.
+
+## Observed 30B USB snapshot and version-query limitation
+
+The developer supplied a 1,794-byte (`0x702`) descriptor snapshot from a 30B
+connected to the printer. Its single configuration is `0x6f0` bytes, with six
+interface numbers. The descriptor-byte SHA-256 is
+`732b7795d9f6945fb32df6f21e4ef85a38c640f396c888b51474b96a7db5e62a`.
+This digest identifies the supplied metadata snapshot, not a firmware image.
+
+| Attribute | Observed 30B value |
+|---|---|
+| VID:PID / device revision | `a108:2240` / `0090` |
+| Manufacturer | `Ingenic Semiconductor Co.,Ltd` |
+| Product | `Ingenic HD Web Camera` |
+| UVC functions | Two, covering interfaces 0/1 and 2/3 |
+| HID | Interface 4, class/subclass/protocol `03/00/00`; interrupt IN `0x84`, OUT `0x01`, each maximum packet 1,024 bytes |
+| ADB | Interface 5, class/subclass/protocol `ff/42/01`; bulk IN `0x85`, OUT `0x02`, each maximum packet 512 bytes |
+| Printer driver observation | No bound driver on HID/ADB; no `/dev/hidraw*` nodes |
+
+Both observed revisions declare two UVC functions. The developer's Windows
+presentation of one camera for the 30B and two for the 30D is not a reliable
+USB-level discriminator. The 30D classifier additionally requires its revision,
+strings and complete standard descriptor topology, including no HID/ADB.
+
+On physical hardware, `inspect` selected HID interface 4 with the expected
+endpoints and reached the version-content validation error. That control flow
+establishes a completed exchange with a matching command and valid framing/CRC;
+it does not establish a successful version status or valid version text.
+The initial generic error did not reveal which content check failed. The cause
+remains unknown until the detailed reply is collected.
+
+A failed version-content check reports command `0x0001`, decimal/hex status,
+payload length, escaped ASCII and a hex preview, capped at 64 payload bytes.
+Nonzero status, empty data, more than 23 bytes and non-printable data still
+refuse before any upload. No extra camera commands or automatic retries are
+introduced. Framing/CRC failures remain protocol errors. Synthetic transport
+tests check diagnostic contents, escaping, bounds and a single version query.
