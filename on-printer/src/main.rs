@@ -213,7 +213,7 @@ mod tests {
             assert!(error.contains("escaped=\""));
             assert!(error.contains("hex=["));
             assert!(error.contains("No upload was started."));
-            assert!(!error.bytes().any(|b| b < 0x20 || b > 0x7e));
+            assert!(error.bytes().all(|b| (0x20..=0x7e).contains(&b)));
             assert_eq!(t.calls, 1);
         }
         let mut t = VersionReply { status: 0, payload: b"1.0.30B".to_vec(), calls: 0 };
