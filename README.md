@@ -26,7 +26,31 @@ The known failure affects the `EF-S7-V1.0.30B` camera family. A newer
 affected by this particular problem.
 
 Do this identification before building a USB cable, buying a programmer, or
-running the tools.
+running a repair operation.
+
+If the camera feed still works, start with the read-only stream check. Install
+[`cc2camera`](docs/INSTALLATION.md), find the printer's IP address or hostname,
+and run:
+
+```sh
+cc2camera identify-camera PRINTER
+```
+
+For example:
+
+```sh
+cc2camera identify-camera 192.168.1.50
+```
+
+This connects only to the printer's MJPEG camera stream on port 8080. It does
+not use USB, HID or ADB and does not modify the printer or camera. The command
+compares three consecutive JPEG encoder fingerprints with known 30B and 30D
+signatures and refuses unknown or changing signatures rather than guessing.
+The 30B signature has been observed on two independent known 30B cameras; the
+30D signature has been observed on one known 30D camera.
+
+If the stream is unavailable, the signature is unknown, or you want authoritative
+visual confirmation, inspect the hardware:
 
 1. Power the printer off and unplug it from mains power.
 2. Remove the camera module from the printer by undoing its single mounting
@@ -49,8 +73,8 @@ unclear, remove the two housing screws and check the complete PCB revision.
 
 Photographs of the `EF-S7-V1.0.30B` board are available in the
 [OpenCentauri camera documentation](https://docs.opencentauri.cc/hardware/CC2/camera/).
-The processor marking is a quick screening aid; the full PCB marking is the
-authoritative visual identification.
+The stream fingerprint is a convenient read-only identification aid. The full
+PCB marking remains the authoritative visual identification.
 
 ## Choose the path that matches your camera
 
