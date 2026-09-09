@@ -13,7 +13,7 @@ The CLI exposes this tradeoff as `install --accept-no-backup-space-risk`.
 This exception applies only to this workflow. The ADB installer, backup, image
 patching, and restore safety contracts remain in effect. The shell installer
 retains mount/partition checks, known firmware fingerprints, regular-file checks,
-unknown-hook refusal, configuration stability checks, and camera-side byte
+default differing-content refusal, configuration stability checks, and camera-side byte
 comparisons. The erase hook itself retains every early-boot compatibility gate.
 There is no generic force option or arbitrary-file/command interface.
 
@@ -167,11 +167,12 @@ not an exported backup or a guarantee against a later concurrent writer.
 
 Canonical hook bytes come from `cc2camera.startup_payloads`; a generation check
 prevents the native copy from drifting. Both payload files are compared against
-embedded MD5 fingerprints in RAM before installation. Unknown managed contents,
-permissions, symlinks and incomplete-installation paths are refused. Existing
+embedded MD5 fingerprints in RAM before installation. Differing managed contents
+are refused unless install explicitly uses `--overwrite-managed-scripts`.
+Unexpected permissions, symlinks and incomplete-installation paths remain refused. Existing
 unrelated regular enabled hooks remain and execute under the canonical runner.
 
-The worker copies each missing file to a fixed refused-if-present temporary
+The worker copies each missing or explicitly replaced file to a fixed refused-if-present temporary
 configuration path, sets mode 755, compares bytes, syncs, renames, and syncs.
 The erase hook is installed before the runner. Final comparisons check both
 files. No direct flash writes, partition erasure/remounting, or live kernel
@@ -285,3 +286,11 @@ cannot diagnose the current refusal. Path-specific checks now distinguish file
 type, stat failure, mode mismatch, content mismatch and comparison-tool failure.
 Offline tests cover absent-file installation and preservation of a canonical
 starter when adding a missing erase hook; these are not new compatibility cases.
+
+The developer authorized optional replacement of both managed scripts after
+observing differing erase-hook and starter contents. The install-only
+`--overwrite-managed-scripts` flag enables that narrow exception. RAM copies
+of existing files are retained outside the worker staging directory, and each
+replacement compares its destination against the original copy before rename.
+Final checks and verification disable replacement admission. The flag does not
+relax file types, permissions, firmware checks, or other enabled-hook handling.

@@ -46,7 +46,7 @@ class CameraShellTests(unittest.TestCase):
         for p in self.bin.iterdir(): p.chmod(0o755)
         script = generator.generate().rsplit('\nmain\n', 1)[0] + '\n'
         script = script.replace('PATH=/bin:/sbin:/usr/bin:/usr/sbin', f'PATH={self.bin}:/bin:/usr/bin')
-        script = script.replace('@TOKEN@', '0123456789abcdef').replace('@MODE@', 'install')
+        script = script.replace('@TOKEN@', '0123456789abcdef').replace('@MODE@', 'install').replace('@OVERWRITE@', '0')
         mounts = self.root/'mounts'
         mounts.write_text(f'/dev/mtdblock5 {self.config} jffs2 rw 0 0\n')
         mtd = self.root/'mtd'
@@ -59,7 +59,7 @@ class CameraShellTests(unittest.TestCase):
             if path == '/dev/mtd1': script=script.replace(generator.KERNEL_MD5,hashlib.md5(content).hexdigest())
             if path == '/bin/hid_update': script=script.replace('8091751fdd4d0d50ea31901663797a86',hashlib.md5(content).hexdigest())
         script = script.replace('/etc/conf.d',str(self.config)).replace('/proc/mounts',str(mounts)).replace('/proc/mtd',str(mtd))
-        self.script = script + f'\nSTAGE={self.stage}\n'
+        self.script = script + f'\nSTAGE={self.stage}\nOLD_DIR={self.root}/originals\n'
 
     def run_shell(self, command='preflight; install_files', modifications=''):
         result = subprocess.run(['sh'], input=self.script+modifications+'\n'+command+'\nprintf "STATUS=%s\\n" "$STATUS"\n', text=True, capture_output=True, timeout=10)
@@ -176,6 +176,57 @@ class CameraShellTests(unittest.TestCase):
                     if kind == 'type': dest.rmdir()
                     else: dest.unlink()
             (self.bin/'busybox').write_text('#!/bin/sh\nexec "$@"\n')
+
+    def setup_old_scripts(self):
+        (self.config/'enabled').mkdir()
+        paths = [self.config/'enabled/10-erase-fix.sh', self.config/'system.sh']
+        for p in paths:
+            p.write_bytes(b'old '+p.name.encode())
+            p.chmod(0o755)
+        extra = self.config/'enabled/90-adb.sh'
+        extra.write_bytes(b'unrelated enabled script')
+        extra.chmod(0o755)
+        return paths, extra
+
+    def test_overwrite_replaces_both_and_preserves_originals_and_other_hooks(self):
+        paths, extra = self.setup_old_scripts()
+        old = [p.read_bytes() for p in paths]
+        result = self.run_shell(modifications='OVERWRITE=1')
+        self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
+        self.assertIn('STATUS=DONE', result.stdout)
+        self.assertEqual([p.read_bytes() for p in paths], [generator.erase_hook(), generator.RUNNER])
+        self.assertEqual([(self.root/'originals'/n).read_bytes() for n in ['fix', 'runner']], old)
+        self.assertEqual(extra.read_bytes(), b'unrelated enabled script')
+        result = self.run_shell(modifications='OVERWRITE=1')
+        self.assertIn('STATUS=SAME', result.stdout)
+        paths[0].write_bytes(b'changed')
+        result = self.run_shell('verify_live', modifications='OVERWRITE=1; MODE=verify')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('erase-hook-content', result.stdout)
+
+    def test_overwrite_does_not_bypass_file_type_mode_or_firmware_checks(self):
+        paths, _ = self.setup_old_scripts()
+        for kind in ['symlink', 'mode', 'firmware']:
+            old = paths[0].read_bytes()
+            if kind == 'symlink': paths[0].unlink(); paths[0].symlink_to(paths[1])
+            elif kind == 'mode': paths[0].chmod(0o644)
+            else: (self.root/'mtd1').write_bytes(b'unsupported')
+            result = self.run_shell(modifications='OVERWRITE=1')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((self.root/'originals').exists())
+            self.assertEqual(paths[1].read_bytes(), b'old system.sh')
+            if kind == 'symlink': paths[0].unlink(); paths[0].write_bytes(old)
+            paths[0].chmod(0o755)
+
+    def test_overwrite_partial_copy_keeps_old_scripts_and_originals(self):
+        paths, _ = self.setup_old_scripts()
+        old = [p.read_bytes() for p in paths]
+        (self.bin/'cp').write_text('#!/bin/sh\ncase "$2" in */.cc2-hid-fix) printf truncated > "$2"; exit 1;; esac\nexec /bin/cp "$@"\n')
+        (self.bin/'cp').chmod(0o755)
+        result = self.run_shell(modifications='OVERWRITE=1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual([p.read_bytes() for p in paths], old)
+        self.assertEqual([(self.root/'originals'/n).read_bytes() for n in ['fix', 'runner']], old)
 
     def test_unknown_hook_or_symlink_never_writes(self):
         dest = self.config/'system.sh'

@@ -97,6 +97,26 @@ diagnostic when reporting an inspection failure. Control bytes are escaped so
 they cannot act as terminal commands. The version check still refuses the
 operation before any upload; these diagnostics do not bypass validation.
 
+## Replacing existing managed scripts
+
+`install --accept-no-backup-space-risk --overwrite-managed-scripts` explicitly
+allows replacing differing contents of `/etc/conf.d/system.sh` and
+`/etc/conf.d/enabled/10-erase-fix.sh`, including scripts from older tool versions.
+This can remove custom behavior in those two files. Other enabled scripts are
+preserved. Without this flag, differing contents remain a refusal.
+
+Only regular, nonsymlink files with mode 755 may be replaced. All firmware,
+identity, mount, partition, stability and readback checks remain. The existing
+no-backup/no-space-check risk consent is still required. `inspect` and `verify`
+reject this flag; verification always requires the tool's exact expected bytes.
+
+Before writes, existing originals are copied to camera RAM under
+`/tmp/.cc2-old-scripts-<session>/fix` and `runner`. They survive worker cleanup
+but are lost when the camera reboots; they are not an exported or durable backup.
+Each replacement rechecks the original against its RAM copy and uses a verified
+temporary file followed by rename. Successful installation checks the final
+contents strictly. Partial-write failures do not automatically roll back.
+
 ## Install, then verify after restart
 
 The following command **can write the camera's persistent configuration**.
@@ -108,8 +128,9 @@ It carries the recovery risk described above:
 
 The tool uploads a temporary installer to camera RAM. The installer checks the
 kernel and HID updater fingerprints, partition map, mounts, identity-file
-presence, and stability of the raw configuration contents. It refuses unknown
-contents or permissions at either managed destination. It installs the canonical
+presence, and stability of the raw configuration contents. By default it refuses
+differing contents at either managed destination. Unexpected permissions are
+always refused. It installs the canonical
 `10-erase-fix.sh` hook first and `system.sh` runner last, comparing temporary and
 final file contents. It preserves unrelated regular enabled hooks and refuses
 non-regular entries. Exact existing managed files are left untouched.

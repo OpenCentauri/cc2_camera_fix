@@ -22,6 +22,11 @@ libraries required by the static build. Only known camera firmware is supported.
       probe and verify the installed hooks and live RAM correction. No persistent
       file or RAM correction writes; temporary files/status are written in /tmp.
 
+Install optionally accepts --overwrite-managed-scripts to replace differing
+contents of system.sh and enabled/10-erase-fix.sh. Custom behavior may be lost.
+Originals are retained in camera RAM for this boot, not exported or durable.
+Other enabled scripts remain untouched. Default: refuse differing contents.
+
 Add --verbose to any command to log every full HID report in hex to stderr,
 including upload payloads, malformed replies and transport errors. No retries.
 
@@ -43,22 +48,27 @@ fn arguments(args: &[String]) -> Result<Action> {
         _ => Err("unknown arguments; run --help".into()),
     }
 }
-fn options(args: &[String]) -> Result<(Action, bool)> {
+fn options(args: &[String]) -> Result<(Action, bool, bool)> {
     let count = args.iter().filter(|a| a.as_str() == "--verbose").count();
     if count > 1 { return Err("--verbose may only be specified once".into()); }
-    let filtered: Vec<String> = args.iter().filter(|a| a.as_str() != "--verbose").cloned().collect();
-    Ok((arguments(&filtered)?, count == 1))
+    let overwrite = args.iter().filter(|a| a.as_str() == "--overwrite-managed-scripts").count();
+    if overwrite > 1 { return Err("--overwrite-managed-scripts may only be specified once".into()); }
+    let filtered: Vec<String> = args.iter().filter(|a| !matches!(a.as_str(), "--verbose" | "--overwrite-managed-scripts")).cloned().collect();
+    let action = arguments(&filtered)?;
+    if overwrite != 0 && action != Action::Install { return Err("--overwrite-managed-scripts requires install".into()); }
+    Ok((action, count == 1, overwrite == 1))
 }
-fn script(token: &str, action: &Action) -> Result<(String, String, Vec<u8>)> {
+fn script(token: &str, action: &Action, overwrite: bool) -> Result<(String, String, Vec<u8>)> {
     if token.len()!=16 || !token.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) {
         return Err("invalid local session token".into());
     }
+    if overwrite && *action != Action::Install { return Err("overwrite requires install".into()); }
     let mode=match action { Action::Install=>"install", Action::Verify=>"verify", _=>return Err("invalid script action".into()) };
     let path=format!("/tmp/.cc2-hid-{token}.sh");
     // Literal fopen must fail (the embedded /bin/sh makes a nonexistent directory
     // component). Only the preceding shell's rm command launches our worker.
     let launch=format!("/tmp/.cc2-launch-{token};/bin/sh${{IFS}}{path}&");
-    let data=include_str!("../payload/installer.sh").replace("@TOKEN@",token).replace("@MODE@",mode).into_bytes();
+    let data=include_str!("../payload/installer.sh").replace("@TOKEN@",token).replace("@MODE@",mode).replace("@OVERWRITE@", if overwrite {"1"} else {"0"}).into_bytes();
     if launch.len()>127 || data.len()>32768 { return Err("embedded installer exceeds protocol limits".into()); }
     Ok((path,launch,data))
 }
@@ -133,13 +143,13 @@ fn version_unavailable(status: u32, payload: &[u8]) -> bool {
 }
 fn run() -> Result<()> {
     // Parse consent and prepare every outgoing target before touching USB.
-    let (action, verbose)=options(&std::env::args().skip(1).collect::<Vec<_>>())?;
+    let (action, verbose, overwrite)=options(&std::env::args().skip(1).collect::<Vec<_>>())?;
     if action==Action::Help { print!("{HELP}"); return Ok(()); }
     let mut random=[0u8;8];
     let prepared=if matches!(action,Action::Install|Action::Verify) {
         std::fs::File::open("/dev/urandom")?.read_exact(&mut random)?;
         let token=format!("{:016x}", u64::from_be_bytes(random));
-        let payload=script(&token,&action)?;
+        let payload=script(&token,&action,overwrite)?;
         Some((token,payload))
     } else { None };
     with_hid_camera(usb::discover()?, &action, |camera| {
@@ -152,6 +162,7 @@ fn run() -> Result<()> {
     }
     if let Some((token,(path,launch,data)))=prepared {
         if action==Action::Install { println!("Accepted: no exported backup or clean-space check; programmer recovery may be required."); }
+        if overwrite { println!("Accepted: replace differing system.sh and enabled/10-erase-fix.sh. Previous custom behavior may be lost. Existing originals are retained in camera RAM at /tmp/.cc2-old-scripts-{token}, lost on reboot."); }
         println!("Uploading temporary camera worker; session {token}. Do not interrupt power.");
         upload(&mut transport,path.as_bytes(),&data,false)?;
         upload(&mut transport,launch.as_bytes(),b"\n",true)?;
@@ -215,12 +226,25 @@ mod tests {
     }
     #[test]
     fn verbose_preserves_consent_and_argument_refusals() {
-        assert_eq!(options(&args(&["--verbose", "inspect"])).unwrap(), (Action::Inspect, true));
-        assert_eq!(options(&args(&["inspect", "--verbose"])).unwrap(), (Action::Inspect, true));
-        assert_eq!(options(&args(&["install", ACCEPT, "--verbose"])).unwrap(), (Action::Install, true));
+        assert_eq!(options(&args(&["--verbose", "inspect"])).unwrap(), (Action::Inspect, true, false));
+        assert_eq!(options(&args(&["inspect", "--verbose"])).unwrap(), (Action::Inspect, true, false));
+        assert_eq!(options(&args(&["install", ACCEPT, "--verbose"])).unwrap(), (Action::Install, true, false));
         assert!(options(&args(&["install", "--verbose"])).is_err());
         assert!(options(&args(&["inspect", "--verbose", "--verbose"])).is_err());
         assert!(options(&args(&["inspect", "--unknown", "--verbose"])).is_err());
+    }
+    #[test]
+    fn overwrite_is_install_only_and_requires_existing_risk_consent() {
+        let flag = "--overwrite-managed-scripts";
+        assert_eq!(options(&args(&["install", ACCEPT, flag])).unwrap(), (Action::Install, false, true));
+        for a in [vec!["install", flag], vec!["inspect", flag], vec!["verify", flag], vec!["install", ACCEPT, flag, flag]] {
+            assert!(options(&args(&a)).is_err());
+        }
+        assert!(script("0123456789abcdef", &Action::Verify, true).is_err());
+        for overwrite in [false, true] {
+            let (_, _, payload) = script("0123456789abcdef", &Action::Install, overwrite).unwrap();
+            assert!(String::from_utf8(payload).unwrap().contains(if overwrite {"OVERWRITE=1"} else {"OVERWRITE=0"}));
+        }
     }
     #[test]
     fn consent_and_unknown_arguments() {
@@ -233,12 +257,12 @@ mod tests {
     #[test]
     fn payload_is_fixed_bounded_and_distinct_per_action() {
         for action in [Action::Install,Action::Verify] {
-            let (path,launch,data)=script("0123456789abcdef",&action).unwrap();
+            let (path,launch,data)=script("0123456789abcdef",&action,false).unwrap();
             assert!(path.starts_with("/tmp/.cc2-hid-"));
             assert!(!launch.contains(' ')); assert!(launch.len()<=127);
             assert!(data.len()<32768); assert!(!data.windows(7).any(|w|w==b"@TOKEN@"));
         }
-        assert!(script("../../x;evil",&Action::Install).is_err());
+        assert!(script("../../x;evil",&Action::Install,false).is_err());
     }
     #[test]
     fn never_accept_stale_or_wrong_operation_success() {
