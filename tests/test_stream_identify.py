@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import unittest
+from unittest import mock
 
 from cc2camera import stream_identify
 
@@ -95,7 +96,7 @@ class StreamIdentifyTests(unittest.TestCase):
         second = stream_identify.JpegFingerprint(
             **{**first.__dict__, "dqt_sha256": "0" * 64}
         )
-        with unittest.mock.patch.object(
+        with mock.patch.object(
             stream_identify, "fingerprint_jpeg", side_effect=[first, second]
         ):
             result = stream_identify.identify_frames([b"one", b"two"])
