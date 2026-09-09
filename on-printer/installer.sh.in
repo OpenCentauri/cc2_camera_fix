@@ -16,13 +16,33 @@ mounted() {
     busybox awk '$2=="/etc/conf.d" {n++; if($1!="/dev/mtdblock5" || $3!="jffs2" || $4 !~ /(^|,)rw(,|$)/)bad=1} END {exit(n!=1 || bad)}' /proc/mounts
 }
 regular() { [ -f "$1" ] && [ ! -L "$1" ]; }
+prepare_status() {
+    # Missing metadata is supported; links and other file types are not.
+    [ ! -L /tmp/version.txt ] || return 1
+    if [ -e /tmp/version.txt ]; then
+        regular /tmp/version.txt || return 1
+        [ "$(busybox stat -c %s /tmp/version.txt)" -le 4096 ] || return 1
+        cp -p /tmp/version.txt "$STAGE/version" || return 1
+    fi
+}
+publish_status() {
+    [ ! -L /tmp/version.txt ] || return 1
+    [ ! -e /tmp/version.txt ] || regular /tmp/version.txt || return 1
+    # Rename a complete record so a query cannot see a truncated status.
+    printf '%s:%s\n' "$TOKEN" "$STATUS" > "$STAGE/status" || return 1
+    cp "$STAGE/status" "$STAGE/status-next" || return 1
+    mv "$STAGE/status-next" /tmp/version.txt
+}
 finish() {
-    # The version query exposes at most 23 bytes. Keep a nonce in every result.
-    printf '%s:%s\n' "$TOKEN" "$STATUS" > /tmp/version.txt
-    # Status is RAM-only and available for two minutes, then restore the exact
-    # original version file. Never clean up incomplete persistent files.
+    publish_status || return 1
     sleep 120
-    cp "$STAGE/version" /tmp/version.txt
+    # Leave unexpected replacements and staging diagnostics untouched.
+    regular /tmp/version.txt && busybox cmp -s "$STAGE/status" /tmp/version.txt || return 1
+    if [ -e "$STAGE/version" ]; then
+        mv "$STAGE/version" /tmp/version.txt || return 1
+    else
+        rm /tmp/version.txt || return 1
+    fi
     rm -rf "$STAGE"
     rm -f "$SELF"
 }
@@ -114,13 +134,13 @@ main() {
     [ ! -L /tmp ] || exit 1
     busybox awk '$2=="/tmp" && $3=="tmpfs" {n++} END {exit(n!=1)}' /proc/mounts || exit 1
     regular "$SELF" || exit 1
-    regular /tmp/version.txt || exit 1
-    [ "$(busybox stat -c %s /tmp/version.txt)" -le 4096 ] || exit 1
     umask 077
     mkdir "$STAGE" || exit 1
-    cp /tmp/version.txt "$STAGE/version" || exit 1
+    prepare_status || exit 1
     trap finish 0
-    printf '%s:BUSY\n' "$TOKEN" > /tmp/version.txt || fail status
+    STATUS=BUSY
+    publish_status || exit 1
+    STATUS=FAIL
     preflight
 @PAYLOADS@
     [ "$(busybox md5sum "$STAGE/fix")" = '@FIX_MD5@  '"$STAGE/fix" ] || fail staged-fix

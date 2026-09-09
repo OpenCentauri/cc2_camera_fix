@@ -81,8 +81,9 @@ fn with_hid_camera(
     }
 }
 /// Send only the read-only version query; reject before any upload on failure.
-fn query_version(transport: &mut impl protocol::Transport) -> Result<Vec<u8>> {
+fn query_version(transport: &mut impl protocol::Transport) -> Result<Option<Vec<u8>>> {
     let (status, version) = send(transport, 1, &[], 1, 0)?;
+    if version_unavailable(status, &version) { return Ok(None); }
     let reason = if status != 0 {
         Some("camera returned a nonzero status")
     } else if version.is_empty() {
@@ -102,7 +103,11 @@ fn query_version(transport: &mut impl protocol::Transport) -> Result<Vec<u8>> {
             if preview.len() < version.len() { " (preview truncated to 64 bytes)" } else { "" }
         ).into());
     }
-    Ok(version)
+    Ok(Some(version))
+}
+// The stock handler returns this exact reply when opening/reading its RAM file fails.
+fn version_unavailable(status: u32, payload: &[u8]) -> bool {
+    status == 1 && payload.is_empty()
 }
 fn run() -> Result<()> {
     // Parse consent and prepare every outgoing target before touching USB.
@@ -119,7 +124,10 @@ fn run() -> Result<()> {
     println!("Camera {}: HID interface {}, input 0x{:02x}, output {:?}",camera.path,camera.interface.number,camera.interface.input,camera.interface.output);
     let mut transport=usb::Usb::open(camera)?;
     let version=query_version(&mut transport)?;
-    println!("Camera version: {}",String::from_utf8_lossy(&version));
+    match version {
+        Some(version) => println!("Camera version: {}", String::from_utf8_lossy(&version)),
+        None => println!("Camera version unavailable (status 1, empty reply). HID communication works; firmware compatibility is not yet verified."),
+    }
     if let Some((token,(path,launch,data)))=prepared {
         if action==Action::Install { println!("Accepted: no exported backup or clean-space check; programmer recovery may be required."); }
         println!("Uploading temporary camera worker; session {token}. Do not interrupt power.");
@@ -128,6 +136,12 @@ fn run() -> Result<()> {
         let deadline=Instant::now()+Duration::from_secs(90);
         while Instant::now()<deadline {
             let (status,payload)=send(&mut transport,1,&[],1,0)?;
+            // The background worker may not have created the status file yet.
+            // Waiting is bounded by the same deadline; no upload is retried.
+            if version_unavailable(status, &payload) {
+                std::thread::sleep(Duration::from_millis(500));
+                continue;
+            }
             if status!=0 { return Err("camera status query failed".into()); }
             if terminal(&payload,&token,&action)? {
                 if action==Action::Install {
@@ -200,7 +214,8 @@ mod tests {
     #[test]
     fn version_diagnostics_preserve_refusals_and_send_only_one_read_query() {
         for (status, payload, reason) in [
-            (1, vec![], "nonzero status"),
+            (2, vec![], "nonzero status"),
+            (1, b"unexpected".to_vec(), "nonzero status"),
             (0, vec![], "empty version payload"),
             (0, vec![b'x'; 24], "exceeds 23 bytes"),
             (0, vec![b'A', 0, 10, 13, 27, 255], "non-printable bytes"),
@@ -217,8 +232,18 @@ mod tests {
             assert_eq!(t.calls, 1);
         }
         let mut t = VersionReply { status: 0, payload: b"1.0.30B".to_vec(), calls: 0 };
-        assert_eq!(query_version(&mut t).unwrap(), b"1.0.30B");
+        assert_eq!(query_version(&mut t).unwrap(), Some(b"1.0.30B".to_vec()));
         assert_eq!(t.calls, 1);
+    }
+    #[test]
+    fn unavailable_version_is_metadata_only_and_sends_one_read_query() {
+        let mut t = VersionReply { status: 1, payload: vec![], calls: 0 };
+        assert_eq!(query_version(&mut t).unwrap(), None);
+        assert_eq!(t.calls, 1);
+        assert!(version_unavailable(1, &[]));
+        assert!(!version_unavailable(0, &[]));
+        assert!(!version_unavailable(2, &[]));
+        assert!(!version_unavailable(1, b"unexpected"));
     }
     #[test]
     fn diagnostic_preview_is_bounded_and_control_bytes_are_escaped() {

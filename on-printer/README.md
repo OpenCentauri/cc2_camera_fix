@@ -81,13 +81,17 @@ remain unsupported. Multiple matching-ID cameras are refused before classificati
 
 For a supported HID camera, `inspect` sends only the version-query command. It does
 not upload scripts or change camera files. Expect exactly one camera, its
-selected HID interface and endpoints, and a printable version response. USB
+selected HID interface and endpoints, and either a printable version response or an unavailable-version message. USB
 identification and a version reply alone do **not** establish compatible
 firmware: the camera-side installer checks fingerprints before persistent writes.
 Stop if inspection reports an error, multiple cameras, or bootloader mode.
 Do not manually unbind arbitrary USB drivers to bypass a refusal.
 
-If the version reply fails validation, the error includes its status, payload
+The exact status-1 reply with no payload means the camera could not open/read
+its temporary version file. This is accepted as unavailable metadata, not proof
+of compatible firmware. Inspection does not create that file.
+
+If another version reply fails validation, the error includes its status, payload
 length, and escaped text/hex bytes (at most 64 bytes of preview). Paste that
 diagnostic when reporting an inspection failure. Control bytes are escaped so
 they cannot act as terminal commands. The version check still refuses the
@@ -159,7 +163,9 @@ files on a later attempt.
 
 Both `install` and `verify` temporarily replace the camera's version-query
 response with a session-specific status. Two minutes after the worker finishes,
-it restores the original version file. The command-launch mechanism leaves the
+it restores the original version file if one existed, or removes the file it
+created. Symlinks, nonregular files and existing files larger than 4096 bytes
+are refused before status writes. The command-launch mechanism leaves the
 camera's HID **uploader** in an error state until the camera daemon restarts;
 version queries remain usable. The program does not automatically restart that
 daemon. Do not attempt another upload in the same boot.

@@ -65,6 +65,60 @@ class CameraShellTests(unittest.TestCase):
         result = subprocess.run(['sh'], input=self.script+modifications+'\n'+command+'\nprintf "STATUS=%s\\n" "$STATUS"\n', text=True, capture_output=True, timeout=10)
         return result
 
+
+    def status_setup(self):
+        version = self.root/'version.txt'
+        self.script = self.script.replace('/tmp/version.txt', str(version))
+        (self.bin/'sleep').write_text('#!/bin/sh\nexit 0\n')
+        (self.bin/'sleep').chmod(0o755)
+        return version
+
+    def test_status_restores_existing_file_or_removes_created_file(self):
+        version = self.status_setup()
+        for existing in (False, True):
+            self.stage.mkdir(exist_ok=True)
+            if existing:
+                version.write_bytes(b'original version\nsecond line\x00')
+                version.chmod(0o640)
+            result = self.run_shell('prepare_status || exit 1; STATUS=BUSY; publish_status || exit 1; cat '+str(version)+'; STATUS=DONE; finish || exit 1')
+            self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
+            self.assertIn('0123456789abcdef:BUSY', result.stdout)
+            if existing:
+                self.assertEqual(version.read_bytes(), b'original version\nsecond line\x00')
+                self.assertEqual(version.stat().st_mode & 0o777, 0o640)
+            else:
+                self.assertFalse(version.exists())
+            self.assertFalse(self.stage.exists())
+            self.assertFalse((self.config/'enabled').exists())
+
+    def test_status_refuses_unsafe_paths_without_changing_targets(self):
+        version = self.status_setup()
+        target = self.root/'target'
+        target.write_text('untouched')
+        for kind in ('link', 'dangling', 'directory', 'fifo', 'oversized'):
+            if kind == 'link': version.symlink_to(target)
+            elif kind == 'dangling': version.symlink_to(self.root/'absent')
+            elif kind == 'directory': version.mkdir()
+            elif kind == 'fifo': os.mkfifo(version)
+            else: version.write_bytes(b'x'*4097)
+            result = self.run_shell('prepare_status || exit 1')
+            self.assertNotEqual(result.returncode, 0, kind)
+            self.assertEqual(target.read_text(), 'untouched')
+            self.assertFalse((self.stage/'version').exists())
+            self.assertFalse((self.config/'enabled').exists())
+            if kind == 'directory': version.rmdir()
+            else: version.unlink()
+
+    def test_status_cleanup_preserves_unexpected_replacement(self):
+        version = self.status_setup()
+        version.write_text('original')
+        (self.bin/'sleep').write_text('#!/bin/sh\nprintf other > '+str(version)+'\n')
+        result = self.run_shell('prepare_status || exit 1; STATUS=DONE; finish || exit 1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(version.read_text(), 'other')
+        self.assertEqual((self.stage/'version').read_text(), 'original')
+        self.assertFalse((self.config/'enabled').exists())
+
     def test_success_then_idempotency_without_persistent_changes(self):
         result = self.run_shell()
         self.assertEqual(result.returncode, 0, result.stdout+result.stderr)

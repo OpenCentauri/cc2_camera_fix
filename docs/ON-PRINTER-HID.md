@@ -142,7 +142,10 @@ colon, and status fit. `BUSY` is nonterminal; `DONE`/`SAME` confirm installation
 comparisons; `LIVE` confirms verification; `FAIL` means preflight refusal and
 `PART` means persistent writes started but did not finish successfully. Results
 from another session or another operation cannot authorize success. The original
-version file is copied back two minutes after the worker finishes. This behavior
+version file is restored two minutes after the worker finishes; if it was absent,
+the newly created file is removed. Status records are published by rename so a
+query cannot observe a partially written record. Unexpected replacements are
+preserved along with staging diagnostics. This behavior
 and its effect on printer software are hardware-unverified.
 
 The first staging upload precedes camera-side checks. It relies on the analyzed
@@ -234,12 +237,19 @@ On physical hardware, `inspect` selected HID interface 4 with the expected
 endpoints and reached the version-content validation error. That control flow
 establishes a completed exchange with a matching command and valid framing/CRC;
 it does not establish a successful version status or valid version text.
-The initial generic error did not reveal which content check failed. The cause
-remains unknown until the detailed reply is collected.
+The detailed physical reply was status 1 with an empty payload. The reconstructed
+handler returns this when opening or reading camera `/tmp/version.txt` fails.
+The supplied repaired, bricked and ADB-repaired flash images have an empty root
+`/tmp` directory and mount tmpfs there; they do not capture the live RAM file.
 
 A failed version-content check reports command `0x0001`, decimal/hex status,
 payload length, escaped ASCII and a hex preview, capped at 64 payload bytes.
-Nonzero status, empty data, more than 23 bytes and non-printable data still
-refuse before any upload. No extra camera commands or automatic retries are
-introduced. Framing/CRC failures remain protocol errors. Synthetic transport
+The developer-approved exception accepts only status 1 with an empty payload
+as unavailable metadata. Inspection still sends one query and performs no upload.
+All other nonzero statuses, status-0 empty data, more than 23 bytes and
+non-printable data refuse before upload. The worker can create the missing RAM
+file; existing symlinks, nonregular files and files above 4096 bytes are refused.
+Firmware and persistent-write checks are unchanged. Polling tolerates that exact
+unavailable reply while the worker starts, within the existing 90-second deadline;
+it never treats it as success or retries an upload. Framing/CRC failures remain protocol errors. Synthetic transport
 tests check diagnostic contents, escaping, bounds and a single version query.
