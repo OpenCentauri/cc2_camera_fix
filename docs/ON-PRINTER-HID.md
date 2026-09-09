@@ -146,7 +146,8 @@ version file is restored two minutes after the worker finishes; if it was absent
 the newly created file is removed. Status records are published by rename so a
 query cannot observe a partially written record. Unexpected replacements are
 preserved along with staging diagnostics. This behavior
-and its effect on printer software are hardware-unverified.
+has been observed for session-bound results; cleanup timing and its effect on
+printer software have not been independently confirmed.
 
 The first staging upload precedes camera-side checks. It relies on the analyzed
 stock `/tmp` layout and a fresh random destination; the worker then requires
@@ -194,22 +195,35 @@ status acceptance, shell fingerprint refusals, unknown files and symlinks,
 configuration changes, partial writes, readback mismatches and idempotency.
 Synthetic fixtures contain no proprietary firmware or real device identity.
 
-The new workflow compiles a static ARMv7 binary and runs tests under QEMU in
-addition to the host tests. These checks cannot substitute for the following
-physical validation:
+The workflow compiles a static ARMv7 binary and runs tests under QEMU in
+addition to host tests.
 
-- inspect the actual camera descriptors and complete a version query from CC2;
-- establish that the printer's camera service tolerates HID access;
-- observe the expected launch-commit failure and current-session status response;
-- compare installation results and verify activation after restart;
-- observe version restoration and normal camera feed operation;
-- exercise any on-device failure investigations deliberately, with programmer
-  access and preserved same-camera data where available.
+On 2026-09-09, the developer supplied physical 30B logs from the on-printer
+binary at commit `ce33161c3a02a7e242cfe313d69c549bd97a96f0`:
 
-The existing hook's physical evidence in
-[STARTUP-HOOKS-VALIDATION.md](STARTUP-HOOKS-VALIDATION.md) does not validate this
-new transport, installer, or otherwise-stock hook-only boot behavior. User
-instructions therefore label this route experimental and hardware-unverified.
+- Installation with `--overwrite-managed-scripts` progressed from `BUSY` to a
+  matching-session `DONE`. The worker completed its checks and verified both
+  installed script contents and mode 755 after persistent writes.
+- The subsequent verification log progressed from `BUSY` to a fresh matching-
+  session `LIVE`. This confirms the worker's installed-file comparisons, kernel
+  fingerprints/instruction/symbol checks, validated pointer, and live erase-size
+  field of `0x00001000`. The verification worker reads that field and does not
+  apply the correction.
+
+This is physical evidence for installation and subsequent live verification
+through the printer's USB HID transport on the tested, previously modified 30B.
+It is not an independent full-flash readback, a clean stock-camera installation
+test, or an erase-pressure/endurance test. Normal camera-feed behavior and the
+status-file cleanup timing have not been separately reported. The route remains
+experimental and retains its no-backup/no-space-admission risks.
+
+Earlier testing after a printer shell `reboot` timed out on the first upload
+packet. A full power cycle allowed uploads again. A printer reboot must not be
+assumed to reset camera power or its updater state; instructions require a full
+power cycle between completed attempts, after worker cleanup.
+
+The existing hook's separate physical evidence is documented in
+[STARTUP-HOOKS-VALIDATION.md](STARTUP-HOOKS-VALIDATION.md).
 
 ## Observed 30B USB snapshot and version-query limitation
 

@@ -1,9 +1,11 @@
 # Install the camera fix from a CC2 shell
 
-`cc2camera-hid` is an **experimental, hardware-unverified** way to protect a
+`cc2camera-hid` is an **experimental** way to protect a
 working affected stock camera while it stays connected inside the printer.
 It runs on the printer, using USB HID directly. The static ARMv7 executable
 needs neither ADB, Python, `hidraw`, nor additional shared libraries.
+Installation with managed-script replacement and subsequent live verification
+have succeeded on the tested 30B camera. See the [validation scope](../docs/ON-PRINTER-HID.md#validation-status).
 
 The [computer-based USB route](../README.md#working-camera-usb-prevention)
 provides an exported backup and a conservative clean-space check. Prefer that
@@ -142,8 +144,11 @@ Camera reports exact installed hook contents and permissions verified.
 ```
 
 This confirms the camera-side file comparisons, **not activation on boot**.
-After that message, wait at least two minutes, restart the idle printer, copy
-the executable back to `/tmp`, and run:
+After that message, wait at least two minutes, fully power-cycle the idle printer, copy
+the executable back to `/tmp`, and run. A shell `reboot` may leave the camera
+powered and its HID uploader in the previous state; it is not sufficient to
+establish a fresh camera boot:
+
 
 ```sh
 /tmp/cc2camera-hid verify

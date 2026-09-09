@@ -18,7 +18,7 @@ libraries required by the static build. Only known camera firmware is supported.
       the camera unbootable and require an external SPI programmer to recover.
       Firmware checks and installed-file comparisons run on the camera.
   cc2camera-hid verify
-      After a successful installation and printer restart, upload a temporary
+      After a successful installation and full printer power cycle, upload a temporary
       probe and verify the installed hooks and live RAM correction. No persistent
       file or RAM correction writes; temporary files/status are written in /tmp.
 
@@ -33,7 +33,9 @@ including upload payloads, malformed replies and transport errors. No retries.
 Install/verify launch a camera shell script, temporarily replace its version
 response for two minutes, and leave its HID uploader unavailable until restart.
 Never retry after an error. A timeout does not cancel a camera-side installer.
-This route requires physical validation; a USB acknowledgement is not success.
+Installation and live verification have passed on a tested 30B camera.
+A USB acknowledgement alone is not installation or activation success.
+A printer shell reboot may leave the camera powered; use a full power cycle.
 ";
 
 #[derive(Debug, PartialEq)]
@@ -178,7 +180,7 @@ fn run() -> Result<()> {
             if status!=0 { return Err("camera status query failed".into()); }
             if terminal(&payload,&token,&action)? {
                 if action==Action::Install {
-                    println!("Camera reports exact installed hook contents and permissions verified. Activation is not yet verified. Wait at least two minutes, restart the idle printer, then run cc2camera-hid verify.");
+                    println!("Camera reports exact installed hook contents and permissions verified. Activation is not yet verified. Wait at least two minutes, fully power-cycle the idle printer, then run cc2camera-hid verify.");
                 } else { println!("Camera reports canonical hooks and the live erase correction verified for this boot."); }
                 return Ok(());
             }
