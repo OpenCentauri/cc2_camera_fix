@@ -105,6 +105,21 @@ compact layout. Zlib decoding caps output at the declared size plus one byte.
 
 ## Supported image family
 
+The `EF-S7-V1.0.30B` PCB label covers at least two materially different
+hardware and firmware layouts. The four-digit PCB manufacturing code appears
+to use `WWYY` week/year order. It is useful evidence, but is not treated as a
+compatibility boundary:
+
+| Observed layout | Manufacturing-code observations | Evidence |
+|---|---|---|
+| Supported 8 MiB `ZB25VQ64` family | `0226`, `0526` (two units), `1526` | The failure was reported on all four cameras. The `1526` unit and one recovered bricked unit have been physically recovered or protected with this fix. |
+| Early 16 MiB `P25Q128H` family | `4025` | Two supplied full dumps share the 16 MiB partition map. Photographs show the T23, 30B PCB label, manufacturing code and 128-Mbit flash. Their JFFS2 cleanmarkers occur at `0x8000` intervals, matching an erase size handled by their kernel. The known `0x4000` erase mismatch has not been established on this layout. |
+
+The early dumps were analyzed privately and remain outside the repository.
+The 16 MiB family is not accepted by the builder or installers. A manufacturing
+code, PCB revision or stream signature never overrides firmware, capacity,
+partition-map or erase-geometry validation.
+
 This release intentionally accepts only the exact firmware family already verified in three independent camera dumps with different unit identities:
 
 - 8 MiB `ZB25VQ64` SPI NOR
