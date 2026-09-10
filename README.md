@@ -44,15 +44,6 @@ For example:
 cc2camera identify-camera 192.168.1.50
 ```
 
-This connects only to the printer's MJPEG camera stream on port 8080. It does
-not use USB, HID or ADB and does not modify the printer or camera. The command
-compares three consecutive JPEG encoder fingerprints with known 30B and 30D
-signatures and refuses unknown or changing signatures rather than guessing.
-The 30B signature has been observed on two independent known 30B cameras; the
-30D signature has been observed on one known 30D camera. The stream identifies
-the camera family, but cannot distinguish the early and affected 30B
-flash-layout variants.
-
 If the stream is unavailable, the signature is unknown, or you want authoritative
 visual confirmation, inspect the hardware:
 
