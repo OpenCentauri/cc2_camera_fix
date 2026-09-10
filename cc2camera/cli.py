@@ -147,15 +147,23 @@ def command_identify_camera(args) -> int:
             "Evidence: this encoder signature has been observed on two independent "
             "known 30B cameras."
         )
-        print("The known camera failure applies to the 30B family.")
+        print(
+            "30B includes more than one flash-layout variant. The affected 8 MiB "
+            "variant has been observed with PCB date codes 0226, 0526 and 1526; "
+            "an earlier 4025 unit uses a different, unsupported 16 MiB layout."
+        )
+        print(
+            "The stream cannot distinguish those variants. Date codes are supporting "
+            "evidence only; do not bypass the tool's firmware and flash-layout checks."
+        )
     else:
         print(
             "Evidence: this encoder signature has been observed on one known 30D camera."
         )
         print("The known 30B camera failure has not been observed on the 30D family.")
     print(
-        "Stream fingerprinting is a read-only identification aid; the PCB revision "
-        "marking remains the authoritative visual identification."
+        "Stream fingerprinting is a read-only family-identification aid; hardware "
+        "markings and the validated firmware layout determine whether the fix applies."
     )
     return 0
 

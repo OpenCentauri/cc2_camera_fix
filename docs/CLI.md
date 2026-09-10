@@ -29,10 +29,13 @@ cc2camera backup OUTPUT.zip [--adb EXECUTABLE] [--serial SERIAL]
   does not use USB, HID or ADB and does not modify the printer or camera.
   An unrecognized or changing signature is refused as unknown rather than
   guessed. The 30B signature has been observed on two independent known 30B
-  cameras; the 30D signature has been observed on one known 30D camera. Stream
-  fingerprinting is therefore an identification aid, while the PCB revision
-  marking remains the authoritative visual identification. Default HTTP timeout:
-  5 seconds.
+  cameras; the 30D signature has been observed on one known 30D camera. The
+  stream cannot distinguish the early 16 MiB and affected 8 MiB 30B variants.
+  Affected 8 MiB cameras have been observed with PCB manufacturing codes
+  `0226`, `0526` and `1526`; a supplied early 16 MiB camera is marked `4025`.
+  These codes appear to use `WWYY` order, but are supporting evidence rather
+  than a safe compatibility cutoff. The tool's firmware and flash-layout
+  checks determine whether the fix applies. Default HTTP timeout: 5 seconds.
 - `start-adb`: temporarily start the existing daemon; no persistent startup
   file. Default timeout: 30 seconds.
 - `install-adb-startup`: install `enabled/90-adb.sh` and the shared

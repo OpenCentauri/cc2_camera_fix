@@ -21,9 +21,11 @@ dump to your device.
 
 ## First identify your camera
 
-The known failure affects the `EF-S7-V1.0.30B` camera family. A newer
-`EF-S7-V1.0.30D` revision uses different hardware and software and is not
-affected by this particular problem.
+The known failure affects one 8 MiB flash-layout variant of the
+`EF-S7-V1.0.30B` camera family. An earlier 16 MiB 30B variant uses materially
+different hardware and firmware. A newer `EF-S7-V1.0.30D` revision also uses
+different hardware and software and is not affected by this particular
+problem.
 
 Do this identification before building a USB cable, buying a programmer, or
 running a repair operation.
@@ -47,7 +49,9 @@ not use USB, HID or ADB and does not modify the printer or camera. The command
 compares three consecutive JPEG encoder fingerprints with known 30B and 30D
 signatures and refuses unknown or changing signatures rather than guessing.
 The 30B signature has been observed on two independent known 30B cameras; the
-30D signature has been observed on one known 30D camera.
+30D signature has been observed on one known 30D camera. The stream identifies
+the camera family, but cannot distinguish the early and affected 30B
+flash-layout variants.
 
 If the stream is unavailable, the signature is unknown, or you want authoritative
 visual confirmation, inspect the hardware:
@@ -63,18 +67,25 @@ unclear, remove the two housing screws and check the complete PCB revision.
 
 ![TX5110 processor on a newer CC2 camera](docs/images/ef-s7-v1.0.30d-tx5110.jpg)
 
-| Identification | What is known |
-|---|---|
-| `EF-S7-V1.0.30B` / Ingenic T23 | This is the family on which the failure has been observed. Continue below. |
-| `EF-S7-V1.0.30D` / likely TX5110 | This revision is not affected by the known failure. This guide does not apply. |
-| Any other revision or processor | It has not been investigated. We do not know whether it is affected, and this guide does not apply. |
+The four-digit PCB manufacturing code appears to use `WWYY` week/year order.
+It is useful supporting evidence, but is not a safe cutoff on its own: component
+or firmware changes may not align exactly with calendar weeks.
+
+| Identification | Observed manufacturing codes | What is known |
+|---|---|---|
+| `EF-S7-V1.0.30B` / Ingenic T23 / 8 MiB `ZB25VQ64` family | `0226`, `0526` (two units), `1526` | This is the supported layout on which the failure has been observed. Continue below. |
+| `EF-S7-V1.0.30B` / Ingenic T23 / 16 MiB `P25Q128H` family | `4025` | This early layout is materially different. The known erase defect has not been established on it, and the current fix does not apply. |
+| `EF-S7-V1.0.30D` / likely TX5110 | Not established | This revision is not affected by the known failure. This guide does not apply. |
+| Any other revision, processor or flash layout | Not established | It has not been investigated. We do not know whether it is affected, and this guide does not apply. |
 
 ![EF-S7-V1.0.30D PCB marking](docs/images/ef-s7-v1.0.30d-revision.png)
 
 Photographs of the `EF-S7-V1.0.30B` board are available in the
 [OpenCentauri camera documentation](https://docs.opencentauri.cc/hardware/CC2/camera/).
-The stream fingerprint is a convenient read-only identification aid. The full
-PCB marking remains the authoritative visual identification.
+The stream fingerprint is a convenient read-only family-identification aid.
+The complete hardware markings and the tool's firmware and flash-layout checks
+determine whether a 30B camera is supported. Never bypass a refusal because a
+date code or stream signature appears to match.
 
 ## Choose the path that matches your camera
 

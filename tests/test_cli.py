@@ -47,8 +47,13 @@ class CliTests(unittest.TestCase):
         identify.assert_called_once_with("printer.local", timeout=5.0)
         adb.assert_not_called()
         hid.assert_not_called()
-        self.assertIn("EF-S7-V1.0.30B", output.getvalue())
-        self.assertIn("read-only identification aid", output.getvalue())
+        report = output.getvalue()
+        self.assertIn("EF-S7-V1.0.30B", report)
+        self.assertIn("0226, 0526 and 1526", report)
+        self.assertIn("4025", report)
+        self.assertIn("stream cannot distinguish", report)
+        self.assertIn("read-only family-identification aid", report)
+        self.assertNotIn("failure applies to the 30B family", report)
 
     def test_identify_camera_refuses_unknown_signature(self):
         fingerprint = cli.stream_identify.JpegFingerprint(
