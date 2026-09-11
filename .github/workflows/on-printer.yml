@@ -1,0 +1,75 @@
+name: On-printer HID tool
+on:
+  push:
+  pull_request:
+  release:
+    types: [published]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Check embedded canonical payload and shell contracts
+        run: |
+          python on-printer/generate_payload.py --check
+          python -m unittest discover -s tests -p test_on_printer.py -v
+          sh -n on-printer/payload/installer.sh
+      - name: Install native build tools
+        run: |
+          rustup toolchain install 1.85.1 --profile minimal --component clippy --target armv7-unknown-linux-musleabihf
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-linux-gnueabihf qemu-user
+      - name: Test native protocol and compile static ARMv7 binary
+        env:
+          CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABIHF_LINKER: arm-linux-gnueabihf-gcc
+          CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABIHF_RUNNER: qemu-arm
+        run: |
+          cargo +1.85.1 test --locked --manifest-path on-printer/Cargo.toml
+          cargo +1.85.1 clippy --locked --manifest-path on-printer/Cargo.toml --all-targets -- -D warnings
+          cargo +1.85.1 test --locked --manifest-path on-printer/Cargo.toml --target armv7-unknown-linux-musleabihf
+          cargo +1.85.1 build --locked --manifest-path on-printer/Cargo.toml --release --target armv7-unknown-linux-musleabihf
+      - name: Check static linking and smoke-test executable
+        run: |
+          mkdir -p dist
+          cp on-printer/target/armv7-unknown-linux-musleabihf/release/cc2camera-hid dist/cc2camera-hid-armv7-linux
+          file dist/cc2camera-hid-armv7-linux
+          if readelf -l dist/cc2camera-hid-armv7-linux | grep -q INTERP; then exit 1; fi
+          if readelf -d dist/cc2camera-hid-armv7-linux | grep -q NEEDED; then exit 1; fi
+          qemu-arm dist/cc2camera-hid-armv7-linux --help
+          if qemu-arm dist/cc2camera-hid-armv7-linux install; then exit 1; fi
+          cd dist
+          sha256sum cc2camera-hid-armv7-linux > cc2camera-hid-armv7-linux.sha256
+          wc -c cc2camera-hid-armv7-linux
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cc2camera-hid-armv7-linux
+          path: |
+            dist/cc2camera-hid-armv7-linux
+            dist/cc2camera-hid-armv7-linux.sha256
+          if-no-files-found: error
+  attach:
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cc2camera-hid-armv7-linux
+          path: dist
+      - name: Attach to the manually published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" dist/cc2camera-hid-armv7-linux dist/cc2camera-hid-armv7-linux.sha256
