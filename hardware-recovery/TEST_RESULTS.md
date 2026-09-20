@@ -51,10 +51,43 @@ was not present in this interoperability run.
 | Shared bricked camera | distinct unit A | `4325aebe84d70dd937de1790aa48f4b36ee2731def0ee5504ed080e4df13e819` | 98.567% non-`FF`; 628 obsolete nodes; only `serial.cfg` live | `5939d62a32fd97ab15a5d9b8ab71571831f0f2a30d66019c23deef892905ec09` | passed |
 | Second bricked camera | distinct unit B | `ff9c8962abd06a14661db1857f6318b06f6378e93c4d812d96224094063bbcf9` | 98.486% non-`FF`; 653 obsolete nodes; only `serial.cfg` live | `269f1b3b205e2ac30ada7cb98a7aeb9ada2e76786dc14abe95ea9c56dce73d1f` | passed |
 
-Both inputs have the same exact invariant firmware fingerprint and stock SquashFS window, but different serials, UOIDs, two-byte HWCONFIG check values, and raw JFFS2 histories. Each output preserves its own complete HWCONFIG partition and exact recovered `serial.cfg` payload.
+Both inputs have the same exact invariant firmware fingerprint and stock SquashFS window, but different serials, UOIDs, three-byte HWCONFIG check values, and raw JFFS2 histories. Each output preserves its own complete HWCONFIG partition and exact recovered `serial.cfg` payload.
 
 The attached unit-B hardware readback was independently hashed and compared
 byte-for-byte with the newly generated clean-data image in this review.
+
+## `12PSSSS3` identity variant validation
+
+Validation date: 2026-09-20
+
+A fourth physical camera supplied a stable multi-read dump with SHA-256
+`574c71e6572093ea1b65c3ca9c3e5e1dd1e55d71443ca7b282db8ce700c45c85`.
+The contributor compared multiple independent reads by MD5; one representative
+raw dump was available for the local software test and was not added to the
+repository.
+
+- Boot, kernel, root, and every invariant system byte match the supported
+  firmware exactly.
+- The stock startup-script window is present.
+- The type-12 record has the observed 261-byte shape and a second observed
+  opaque extension value.
+- The serial and UOID use the structurally matching `12PSSSS3` family.
+- The dump established a three-byte unit check at `0x7D200A–0x7D200C` and a
+  calendar-shaped field at `0x7D206F–0x7D2072`, decoding to `2026-03-02`.
+- After normalizing those validated unit fields, every remaining HWCONFIG byte
+  matches the existing cameras exactly.
+- Config is 98.761% non-`FF`, with 634 CRC-valid nodes, 632 obsolete nodes, and
+  only `serial.cfg` live.
+- Strict inspection passed. A local serial-only recovery build passed complete
+  post-build validation and produced SHA-256
+  `c28fdd1865219a82dd815bea3333acba91091ac809721b130e805adb53062b66`.
+  The build preserved HWCONFIG byte-for-byte and changed only the audited
+  startup-script window and config partition.
+
+The local recovery build used the explicit reduced-read option because only
+one representative file, rather than all independently acquired copies, was
+available in the test environment. This is software validation only; the
+generated image was not flashed or boot-tested.
 
 ## Independent filesystem and patch checks
 
@@ -77,8 +110,10 @@ byte-for-byte with the newly generated clean-data image in this review.
   bytes passed strict analysis and recovery generation; the generated image
   retained HWCONFIG byte-for-byte. This is software validation, not a physical
   flash or boot test of that camera.
-- Two distinct real serial/UOID pairs: accepted and preserved.
-- Structurally valid synthetic third unit with two confirmation reads (three total): accepted and preserved.
+- Four distinct real serial/UOID identities were inspected; the available
+  full-ROM regression inputs were accepted and preserved.
+- An additional structurally valid synthetic identity with two confirmation
+  reads (three total): accepted and preserved.
 - A raw image with only one read: rejected unless `--allow-fewer-reads` is explicit.
 - One-bit kernel mutation: rejected.
 - One-bit system-patch-window mutation: rejected.
@@ -91,6 +126,6 @@ byte-for-byte with the newly generated clean-data image in this review.
 
 ## Scope of the recovery claim
 
-Software-level recovery is verified: both bricked dumps are transformed into strict, canonical images with the documented hashes, readable patched startup logic, preserved unit identity, and valid filesystem structures. One output also equals the earlier recorded permanent readback hash.
+Software-level recovery is verified: the available bricked dumps are transformed into strict, canonical images with the documented hashes, readable patched startup logic, preserved unit identity, and valid filesystem structures. One output also equals the earlier recorded permanent readback hash.
 
 Hardware-level recovery is not newly proven by this review. That requires flashing a physical bricked camera, making a full byte-identical readback, and observing a successful boot/USB enumeration. The tool's generated `FLASHING.txt` makes that the required final validation step.

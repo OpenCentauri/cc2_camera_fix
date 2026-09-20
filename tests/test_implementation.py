@@ -81,12 +81,15 @@ class ImplementationTests(unittest.TestCase):
             tool.HW_KNOWN_PAYLOAD_END:
             tool.HW_KNOWN_PAYLOAD_END + len(extension)
         ] = extension
-        uoid = b"12PSSSS4DIFF" + b"A" * 82
+        uoid = b"12PSSSS3DIFF" + b"A" * 82
         image[tool.HW_UOID_START:tool.HW_UOID_END] = uoid
-        image[tool.HW_CHECK_START:tool.HW_CHECK_END] = b"\x01\x02"
+        image[tool.HW_CHECK_START:tool.HW_CHECK_END] = b"\x01\x02\x03"
+        image[tool.HW_DATE_START:tool.HW_DATE_END] = (
+            (2026).to_bytes(2, "little") + bytes((3, 2))
+        )
 
         serial_payload = (
-            b"serial=12PSSSS4TEST000000000000000000000000\n"
+            b"serial=12PSSSS3TEST000000000000000000000000\n"
         )
         serial_value = serial_payload.removeprefix(b"serial=").removesuffix(b"\n")
         self.assertNotEqual(serial_value[:12], uoid[:12])
@@ -99,8 +102,8 @@ class ImplementationTests(unittest.TestCase):
         before_identity_sha256 = tool.sha256(
             tool.normalized_hwconfig_before_identity(image)
         )
-        after_uoid_sha256 = tool.sha256(
-            tool.normalized_hwconfig_after_uoid(image, hwconfig_record)
+        after_unit_fields_sha256 = tool.sha256(
+            tool.normalized_hwconfig_after_unit_fields(image, hwconfig_record)
         )
         invariant_sha256 = tool.sha256(
             tool.invariant_bytes(image, hwconfig_record)
@@ -129,8 +132,8 @@ class ImplementationTests(unittest.TestCase):
                 ),
                 mock.patch.object(
                     tool,
-                    "HWCONFIG_AFTER_UOID_SHA256",
-                    after_uoid_sha256,
+                    "HWCONFIG_AFTER_UNIT_FIELDS_SHA256",
+                    after_unit_fields_sha256,
                 ),
                 mock.patch.object(
                     tool,
@@ -176,6 +179,7 @@ class ImplementationTests(unittest.TestCase):
                 extension,
             )
             self.assertEqual(result["analysis"]["hwconfig_extension_length"], 5)
+            self.assertEqual(result["analysis"]["hwconfig_date"], "2026-03-02")
             self.assertEqual(
                 result["analysis"]["hwconfig_extension_sha256"],
                 tool.sha256(extension),
@@ -201,6 +205,10 @@ class ImplementationTests(unittest.TestCase):
             self.assertEqual(
                 generated_manifest["validation"]["hwconfig_extension_sha256"],
                 tool.sha256(extension),
+            )
+            self.assertEqual(
+                generated_manifest["validation"]["hwconfig_date"],
+                "2026-03-02",
             )
             self.assertNotIn(
                 "serial_uoid_prefix_match", generated_manifest["validation"]

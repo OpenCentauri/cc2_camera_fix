@@ -120,7 +120,7 @@ The 16 MiB family is not accepted by the builder or installers. A manufacturing
 code, PCB revision or stream signature never overrides firmware, capacity,
 partition-map or erase-geometry validation.
 
-This release intentionally accepts only the exact firmware family already verified in three independent camera dumps with different unit identities:
+This release intentionally accepts only the exact firmware family already verified in four independent camera dumps with different unit identities:
 
 - 8 MiB `ZB25VQ64` SPI NOR
 - Ingenic T23N
@@ -142,7 +142,13 @@ There is no override or `--force` option for a mismatching firmware build. A ref
 
 ## How validation handles different camera identities
 
-A complete raw dump cannot be compared by ignoring only the visible serial string. JFFS2 appends new nodes on each boot, so two otherwise identical cameras naturally have different raw `config` histories. The HWCONFIG partition also contains a per-unit UOID and an associated two-byte value.
+A complete raw dump cannot be compared by ignoring only the visible serial
+string. JFFS2 appends new nodes on each boot, so two otherwise identical
+cameras naturally have different raw `config` histories. The HWCONFIG
+partition also contains a per-unit UOID, an associated three-byte value, and a
+four-byte little-endian year/month/day field. The date interpretation is based
+on the observed `2026-03-02` and `2026-04-01` byte sequences; its exact vendor
+semantics remain unknown.
 
 The known 256-byte prefix of its type-12 length-prefixed record is validated.
 Two payload lengths have been directly observed:
@@ -150,14 +156,21 @@ Two payload lengths have been directly observed:
 | Observed shape | Encoded payload length | Bytes after the known 256-byte prefix |
 |---|---:|---|
 | `type12-length256` | 256 (`0x0100`) | none |
-| `type12-length261` | 261 (`0x0105`) | `00 00 02 98 40` |
+| `type12-length261` | 261 (`0x0105`) | `00 00 02 98 40` or `00 00 00 08 40` |
 
-The second shape was observed in a third stable three-read dump. Its boot,
-kernel, root, system, stock startup-script window, partition layout, identity
-structure, and exhausted JFFS2 failure state match the supported family. The
-record length exactly includes the five added bytes. The camera's own
+The second shape was observed in stable multi-read dumps. Their boot, kernel,
+root, system, stock startup-script window, partition layout, identity
+structures, and exhausted JFFS2 failure states match the supported family.
+The record length exactly includes the five added bytes. The camera's own
 `ucamera` executable advances over this structure as a little-endian 16-bit
 type, a little-endian 16-bit payload length, and that many payload bytes.
+
+The observed serial and UOID families begin with either `12PSSSS3` or
+`12PSSSS4`. Both retain the same total lengths and remaining character
+structure. The fourth camera established that the adjacent check field spans
+three bytes and that the calendar-shaped field varies by unit. Both fields are
+preserved exactly and validated structurally rather than treated as firmware
+bytes.
 
 The meaning of the five-byte extension is unknown, so its value is not treated
 as a firmware invariant. The validator requires record type 12 and one of the
@@ -170,13 +183,16 @@ lengths remain unsupported until physically observed.
 
 The validator therefore performs the strongest safe equivalent of “100% match apart from unit data”:
 
-1. Every firmware byte that should be invariant must match the exact fingerprints after normalizing the five-byte HWCONFIG extension, when present.
+1. Every firmware byte that should be invariant must match the exact
+   fingerprints after normalizing the structurally validated unit fields and
+   the five-byte HWCONFIG extension, when present.
 2. The 32 KiB SquashFS window containing `bashrc.sh` must equal either the exact stock hash or the exact audited patched hash.
 3. These fields are excluded from or normalized for the invariant hash:
 
 ```text
-0x7D200B–0x7D200C  two-byte HWCONFIG unit check value
+0x7D200A–0x7D200C  three-byte HWCONFIG unit check value
 0x7D2011–0x7D206E  94-byte HWCONFIG UOID
+0x7D206F–0x7D2072  little-endian year/month/day field
 0x7D2002–0x7D2003  normalized type-12 payload length
 0x7D2104–0x7D2108  opaque five-byte type-12 extension, when present
 0x7E0000–0x7FFFFF  writable JFFS2 config log
@@ -185,7 +201,10 @@ The validator therefore performs the strongest safe equivalent of “100% match 
 4. The excluded fields are still validated:
    - the type-12 length must be one of the two physically observed lengths;
    - the extension length and SHA-256 are recorded;
-   - the UOID must have the expected 94-byte structure;
+   - an all-zero or all-`FF` check value is reported as a warning;
+   - the UOID must have an observed prefix and the expected 94-byte structure;
+   - the four-byte date must decode as one of the physically observed calendar
+     values, `2026-03-02` or `2026-04-01`;
    - `config` must contain CRC-valid JFFS2 nodes;
    - serial-only accepts only the six known filenames unless
      `--wipe-unknown-config` is explicit;
@@ -225,10 +244,11 @@ only for the observed five-byte extension. A future Elegoo/Jovision build,
 another payload length, or a different record type or known-prefix layout must
 be analyzed and fingerprinted separately.
 
-Three real unit identities were directly inspected, including one with the
-261-byte HWCONFIG record. Invariant firmware and the known HWCONFIG prefix must
-match exactly after extension normalization, while the UOID and serial must
-each match their observed structure.
+Four real unit identities were directly inspected, including two with the
+261-byte HWCONFIG record and one `12PSSSS3` identity. Invariant firmware and
+the known HWCONFIG prefix must match exactly after unit-field and extension
+normalization, while the UOID and serial must each match their observed
+structure.
 All unit-specific HWCONFIG bytes and the recovered serial payload are preserved
 exactly. Because the proprietary full serial↔UOID derivation is unknown, the
 tool does not infer or enforce a relationship between those independently

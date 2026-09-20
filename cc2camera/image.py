@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Strict, self-contained recovery builder for the Elegoo Centauri Carbon 2
-stock camera firmware family observed in two independent 8 MiB dumps.
+stock camera firmware family observed in four independent 8 MiB dumps.
 
 The tool:
   * validates every invariant firmware byte against fingerprints derived
@@ -19,6 +19,7 @@ option for unknown firmware.
 from __future__ import annotations
 
 import argparse
+from datetime import date
 import hashlib
 import json
 import lzma
@@ -66,18 +67,22 @@ EXPECTED_USB_PARTITIONS = (
     (5, 0x020000, "config"),
 )
 
-# The HWCONFIG type-12 record contains a unit-specific two-byte check value and
-# a 94-byte encrypted/encoded UOID in its known 256-byte prefix. Some cameras
-# append opaque bytes to that payload. The record length bounds those bytes;
-# recovery preserves them exactly but normalizes them for invariant hashing.
+# The HWCONFIG type-12 record contains a unit-specific three-byte check value,
+# a 94-byte encrypted/encoded UOID, and a four-byte little-endian calendar date
+# in its known 256-byte prefix. Some cameras append opaque bytes to that
+# payload. The record length bounds those bytes; recovery preserves all of
+# these unit-specific values exactly but normalizes them for invariant hashing.
 HW_RECORD_START = 0x7D2000
 HW_RECORD_PAYLOAD_START = HW_RECORD_START + 4
 HW_KNOWN_PAYLOAD_END = HW_RECORD_PAYLOAD_START + 0x100
 HW_SUPPORTED_PAYLOAD_LENGTHS = (0x100, 0x105)
-HW_CHECK_START = 0x7D200B
+HW_CHECK_START = 0x7D200A
 HW_CHECK_END = 0x7D200D
 HW_UOID_START = 0x7D2011
 HW_UOID_END = 0x7D206F
+HW_DATE_START = HW_UOID_END
+HW_DATE_END = 0x7D2073
+HW_SUPPORTED_DATES = frozenset((date(2026, 3, 2), date(2026, 4, 1)))
 
 JFFS2_MAGIC = 0x1985
 JFFS2_NODE_ACCURATE = 0x2000
@@ -94,8 +99,8 @@ KNOWN_CONFIG_NAMES = {
     b"dev_config.cfg",
 }
 
-SERIAL_PATTERN = re.compile(rb"^serial=(12PSSSS4[A-Z0-9]{28})\n$")
-UOID_PATTERN = re.compile(rb"^12PSSSS4[A-Za-z0-9+/=]{86}$")
+SERIAL_PATTERN = re.compile(rb"^serial=(12PSSSS[34][A-Z0-9]{28})\n$")
+UOID_PATTERN = re.compile(rb"^12PSSSS[34][A-Za-z0-9+/=]{86}$")
 
 # Exact byte ranges shared by every supported HWCONFIG variant.
 REFERENCE_SEGMENTS = {
@@ -107,17 +112,18 @@ REFERENCE_SEGMENTS = {
     "hwconfig_between_identity_fields": (0x7D200D, 0x7D2011, "3c3351dc1dedcd627419e02de4fc8202e2d507d786c26f142b767fd9859d0cb4"),
 }
 
-# These hashes use the type-12 record's canonical 256-byte payload length and
-# zero bytes in place of any declared extension. This retains exact checking of
-# all known bytes without treating an unknown opaque extension as firmware.
+# These hashes use the type-12 record's canonical 256-byte payload length,
+# exclude the structurally validated unit fields, and use zero bytes in place
+# of any declared extension. This retains exact checking of every other byte
+# without treating unit data or an unknown opaque extension as firmware.
 HWCONFIG_BEFORE_IDENTITY_SHA256 = (
-    "0e1514680c4e25e5c431adae5d4cb98bac14746b6e8fc30eb346ec75249f7cc5"
+    "e9ba6b36ab55dd0284e7cfcaf8c6ece3b4903bf953dcae34026244a5febd701d"
 )
-HWCONFIG_AFTER_UOID_SHA256 = (
-    "98d0beba4c7328a7237bc1a18fdd5e3da64c9f009e3b1c253ea39167a6dabd97"
+HWCONFIG_AFTER_UNIT_FIELDS_SHA256 = (
+    "f2e10823638187acb4572437debe618bb1c27d0a8796d40445c3132cdd805601"
 )
 NORMALIZED_INVARIANT_SHA256 = (
-    "7346221d7814c8ef4412ced5f3795891f077f89ba64cf61d087e01fc5344f62f"
+    "4dee29ee9f996779a8af0f4e4a66ebad3c6c1ca353cf8b4287b4f1f9a8b12823"
 )
 
 ORIGINAL_PATCH_SHA256 = "5591f5350feabb73fd29e21ae72ee9c3c9dab0c6bb78e02178267e5cb2ab4780"
@@ -1178,12 +1184,12 @@ def normalized_hwconfig_before_identity(image: bytes) -> bytes:
     )
 
 
-def normalized_hwconfig_after_uoid(
+def normalized_hwconfig_after_unit_fields(
     image: bytes, record: dict[str, Any]
 ) -> bytes:
     extension_length = record["extension_length"]
     return (
-        image[HW_UOID_END:HW_KNOWN_PAYLOAD_END]
+        image[HW_DATE_END:HW_KNOWN_PAYLOAD_END]
         + b"\0" * extension_length
         + image[record["record_end"]:CONFIG_START]
     )
@@ -1200,8 +1206,30 @@ def invariant_bytes(
         + (0x100).to_bytes(2, "little")
         + image[HW_RECORD_PAYLOAD_START:HW_CHECK_START]
         + image[HW_CHECK_END:HW_UOID_START]
-        + normalized_hwconfig_after_uoid(image, record)
+        + normalized_hwconfig_after_unit_fields(image, record)
     )
+
+
+def decode_hwconfig_date(image: bytes) -> str:
+    year = int.from_bytes(image[HW_DATE_START:HW_DATE_START + 2], "little")
+    month = image[HW_DATE_START + 2]
+    day = image[HW_DATE_START + 3]
+    try:
+        value = date(year, month, day)
+    except ValueError as exc:
+        raise ValidationError(
+            "The unit-specific HWCONFIG date field is not a valid "
+            f"little-endian year/month/day value ({year:04d}-{month:02d}-{day:02d})"
+        ) from exc
+    if value not in HW_SUPPORTED_DATES:
+        supported = ", ".join(
+            item.isoformat() for item in sorted(HW_SUPPORTED_DATES)
+        )
+        raise ValidationError(
+            "The unit-specific HWCONFIG date field is not one of the physically "
+            f"observed values {supported} (value={value.isoformat()})"
+        )
+    return value.isoformat()
 
 
 def identify_hwconfig_variant(image: bytes) -> tuple[str, dict[str, Any]]:
@@ -1337,11 +1365,11 @@ def analyze_image(
                 HWCONFIG_BEFORE_IDENTITY_SHA256,
                 normalized_hwconfig_before_identity(image),
             ),
-            "hwconfig_after_uoid": (
-                HW_UOID_END,
+            "hwconfig_after_unit_fields": (
+                HW_DATE_END,
                 CONFIG_START,
-                HWCONFIG_AFTER_UOID_SHA256,
-                normalized_hwconfig_after_uoid(image, hwconfig_record),
+                HWCONFIG_AFTER_UNIT_FIELDS_SHA256,
+                normalized_hwconfig_after_unit_fields(image, hwconfig_record),
             ),
         }
         for name, (start, end, expected_hash, normalized_bytes) in (
@@ -1361,8 +1389,8 @@ def analyze_image(
             if not ok:
                 errors.append(
                     f"{name} 0x{start:06X}-0x{end - 1:06X} does not match "
-                    "the supported reference firmware after normalizing the "
-                    "HWCONFIG extension"
+                    "the supported reference firmware after normalizing "
+                    "HWCONFIG unit fields and extension"
                 )
 
         actual_invariant_hash = sha256(invariant_bytes(image, hwconfig_record))
@@ -1393,10 +1421,16 @@ def analyze_image(
         )
 
     check_value = image[HW_CHECK_START:HW_CHECK_END]
-    if check_value in (b"\x00\x00", b"\xFF\xFF"):
+    if check_value in (b"\x00" * 3, b"\xFF" * 3):
         warnings.append(
-            "The unit-specific two-byte HWCONFIG check value is all-zero/all-FF"
+            "The unit-specific three-byte HWCONFIG check value is all-zero/all-FF"
         )
+
+    try:
+        hwconfig_date = decode_hwconfig_date(image)
+    except ValidationError as exc:
+        errors.append(str(exc))
+        hwconfig_date = "invalid"
 
     config = image[CONFIG_START:CONFIG_END]
     try:
@@ -1438,6 +1472,7 @@ def analyze_image(
         "system_state": system_state,
         "system_patch_sha256": patch_hash,
         "hwconfig_check_hex": check_value.hex(),
+        "hwconfig_date": hwconfig_date,
         "uoid": uoid,
         "uoid_sha256": sha256(uoid),
         "serial_payload": config_info["serial_payload"],
@@ -1543,6 +1578,7 @@ Invariant segments:
 Unit-specific data
 ------------------
 HWCONFIG check bytes:    {analysis['hwconfig_check_hex']}
+HWCONFIG unit date:      {analysis['hwconfig_date']}
 HWCONFIG UOID:           {uoid_display}
 UOID SHA-256:            {analysis['uoid_sha256']}
 serial.cfg source:       {analysis['serial_source']}
@@ -1779,6 +1815,7 @@ def build_recovery(
                 "hwconfig_extension_sha256": analysis[
                     "hwconfig_extension_sha256"
                 ],
+                "hwconfig_date": analysis["hwconfig_date"],
                 "system_state_before": analysis["system_state"],
                 "system_state_after": output_analysis["system_state"],
                 "serial_source": analysis["serial_source"],
