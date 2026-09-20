@@ -128,6 +128,11 @@ class HwconfigVariantTests(unittest.TestCase):
         self.assertEqual(tool.decode_hwconfig_date(bytes(image)), "2026-03-02")
 
         image[tool.HW_DATE_START:tool.HW_DATE_END] = (
+            (2026).to_bytes(2, "little") + bytes((4, 1))
+        )
+        self.assertEqual(tool.decode_hwconfig_date(bytes(image)), "2026-04-01")
+
+        image[tool.HW_DATE_START:tool.HW_DATE_END] = (
             (2026).to_bytes(2, "little") + bytes((2, 30))
         )
         with self.assertRaisesRegex(tool.ValidationError, "not a valid"):
