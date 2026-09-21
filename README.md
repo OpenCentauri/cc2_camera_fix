@@ -19,6 +19,16 @@ dump to your device.
 > It has produced the expected result in two tested cases, but if you have any
 > doubts, independently audit the tools before using them on your hardware.
 
+## Already have a root shell on the printer?
+
+The [experimental on-printer HID installer](on-printer/README.md) can install
+and verify the startup fix while a working camera stays connected inside the
+CC2. It needs neither ADB nor Python on the printer. It does **not** export a
+backup or check safely erased configuration space; a failed write may require
+an external programmer. Read that guide's risks and prerequisites before use.
+This route is hardware-unverified. The computer-based route below retains its
+backup and space checks.
+
 ## First identify your camera
 
 The known failure affects one 8 MiB flash-layout variant of the
