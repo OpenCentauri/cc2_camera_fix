@@ -23,6 +23,3 @@ Thumbs.db
 *.swp
 *~
 *.spec
-
-# Native on-printer builds
-on-printer/target/
