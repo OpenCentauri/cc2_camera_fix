@@ -35,7 +35,9 @@ response for two minutes, and leave its HID uploader unavailable until restart.
 Never retry after an error. A timeout does not cancel a camera-side installer.
 Installation and live verification have passed on a tested 30B camera.
 A USB acknowledgement alone is not installation or activation success.
-A printer shell reboot may leave the camera powered; use a full power cycle.
+No reboot is needed before first installation or between inspect and install.
+After successful installation, verification needs a full camera power cycle;
+a printer shell reboot may leave the camera powered.
 ";
 
 #[derive(Debug, PartialEq)]
