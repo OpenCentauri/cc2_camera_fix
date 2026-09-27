@@ -59,6 +59,8 @@ on yours in an issue.
 
 For a version containing this tool, download `cc2camera-hid-armv7-linux` and its
 `.sha256` file from the repository's [GitHub Releases](https://github.com/OpenCentauri/cc2_camera_fix/releases).
+The release workflow builds and attaches the ARM binary and checksum alongside
+the Windows executable when a release is manually published.
 Before a release is available, the **On-printer HID tool** workflow on the PR
 provides the same files in its `cc2camera-hid-armv7-linux` artifact. Extract that
 artifact on your computer and place the two files at the root of a USB drive.
