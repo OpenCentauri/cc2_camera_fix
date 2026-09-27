@@ -1,8 +1,39 @@
 # Prevent or recover the Elegoo CC2 stock camera failure
 
-Some stock Elegoo Centauri Carbon 2 cameras can stop working after repeated
-printer power cycles. This repository provides ways to protect or recover
-an affected camera:
+## First: two different problems can stop the camera feed
+
+- **The camera module stops booting after repeated printer power cycles.**
+  On affected cameras, old configuration data fills the camera's own flash
+  storage because cleanup is broken. **This repository prevents or repairs
+  that camera-module failure** on the supported hardware described below.
+- **The feed works, then disappears after hours of operation, especially in
+  LAN mode.** A separate bug in the printer's `ai_camera` streaming program
+  retains resources from disconnected viewers until the program crashes.
+  The camera module itself may still work. **The camera-flash fix in this
+  repository does not fix that printer-side streaming bug.**
+
+These problems can coexist. A blank preview, unavailable stream, or failed
+`identify-camera` connection alone does not tell them apart. Do not open or
+flash the camera just because the feed is unavailable; see the
+[printer-side failure research and diagnostic notes](docs/PRINTER-LAN-STREAM-FAILURE.md).
+
+### An option for the printer-side streaming problem
+
+For owners who already have root access to their CC2, or are considering
+rooting it, [viridivn/ai_camera](https://github.com/viridivn/ai_camera) is a
+possible replacement for the printer's stock streaming program. The owner who
+supplied the crash reported about a week of successful use of this replacement;
+that is one user's experience, not a guarantee. Upstream warns that it is only
+tested in LAN-only mode, removes all AI functionality, needs more stress testing,
+and is not tested on all firmware versions. Read its current instructions and
+limitations, keep a backup of the stock binary, and make changes only when no
+print is running. This is a printer-software replacement, not a camera-flash
+repair, and it is not installed by `cc2camera`.
+
+## Camera-module prevention and recovery
+
+For a supported camera with the flash/configuration problem, this repository
+provides three routes:
 
 - a working camera can receive a small startup fix through USB without
   flashing a firmware image;
@@ -33,11 +64,12 @@ results, get help, and guide any needed tool adjustments.
 
 ## First identify your camera
 
-The known failure affects one 8 MiB flash-layout variant of the
-`EF-S7-V1.0.30B` camera family. An earlier 16 MiB 30B variant uses materially
+The known camera-module flash failure affects one 8 MiB flash-layout variant
+of the `EF-S7-V1.0.30B` camera family. An earlier 16 MiB 30B variant uses materially
 different hardware and firmware. A newer `EF-S7-V1.0.30D` revision also uses
 different hardware and software and is not affected by this particular
-problem.
+flash problem. Camera revision does not rule out the separate printer-side
+streaming bug.
 
 Do this identification before building a USB cable, buying a programmer, or
 running a repair operation.
@@ -56,17 +88,20 @@ For example:
 cc2camera identify-camera 192.168.1.50
 ```
 
-If the stream is unavailable, the signature is unknown, or you want authoritative
-visual confirmation, inspect the hardware:
+If the stream is unavailable, first consider the
+[printer-side streaming problem](#first-two-different-problems-can-stop-the-camera-feed).
+An unavailable stream is not a camera identification. For an unknown signature
+or authoritative visual confirmation, inspect the hardware:
 
 1. Power the printer off and unplug it from mains power.
 2. Remove the camera module from the printer by undoing its single mounting
    screw, then unplug its four-wire cable.
 3. Look at the large processor on the camera mainboard that's now in front of you.
 
-If it is marked `TX5110`, the camera is likely the newer, unaffected family.
-This recovery does not apply. If it is marked `Ingenic T23`, or the marking is
-unclear, remove the two housing screws and check the complete PCB revision.
+If it is marked `TX5110`, the camera is likely the newer family, unaffected by
+the known camera-flash defect. This camera recovery does not apply. If it is
+marked `Ingenic T23`, or the marking is unclear, remove the two housing screws
+and check the complete PCB revision.
 
 ![TX5110 processor on a newer CC2 camera](docs/images/ef-s7-v1.0.30d-tx5110.jpg)
 
@@ -78,7 +113,7 @@ or firmware changes may not align exactly with calendar weeks.
 |---|---|---|
 | `EF-S7-V1.0.30B` / Ingenic T23 / 8 MiB `ZB25VQ64` family | `0226`, `0526` (two units), `1526` | This is the supported layout on which the failure has been observed. Continue below. |
 | `EF-S7-V1.0.30B` / Ingenic T23 / 16 MiB `P25Q128H` family | `4025` | This early layout is materially different. The known erase defect has not been established on it, and the current fix does not apply. |
-| `EF-S7-V1.0.30D` / likely TX5110 | Not established | This revision is not affected by the known failure. This guide does not apply. |
+| `EF-S7-V1.0.30D` / likely TX5110 | Not established | This revision is not affected by the known camera-flash failure. The camera repair below does not apply. |
 | Any other revision, processor or flash layout | Not established | It has not been investigated. We do not know whether it is affected, and this guide does not apply. |
 
 ![EF-S7-V1.0.30D PCB marking](docs/images/ef-s7-v1.0.30d-revision.png)
@@ -99,16 +134,23 @@ simple camera-to-USB cable but no SPI programmer.
 
 ### The affected camera no longer works
 
-First check whether the fault is isolated to the camera:
+First consider the printer-side streaming failure described above. Perform
+hardware comparisons only when no print is running. Rebooting also restarts
+the printer's streaming program, so a replacement webcam working after a
+reboot is not, on its own, proof that the stock camera failed.
 
-1. Leave the stock camera disconnected.
+To compare with an ordinary webcam:
+
+1. With the printer off and unplugged, disconnect the stock camera.
 2. While the printer is off, connect a known-working ordinary USB webcam to
    the printer's front USB port.
 3. Power the printer on.
 
-If the replacement webcam produces a feed, the stock camera is likely the
-problem. Continue with the
-[hardware recovery route](#failed-camera-hardware-recovery).
+If the replacement webcam produces a feed but the stock camera still fails
+from a fresh boot, that supports a camera-side fault. For a supported camera,
+continue with the [hardware recovery route](#failed-camera-hardware-recovery).
+If the stock camera works again and only loses its feed later, investigate
+the printer-side streaming service instead of assuming the flash needs repair.
 
 If the replacement webcam also fails, this test has not isolated the problem
 to the stock camera. Stop this camera-recovery procedure.
@@ -401,6 +443,7 @@ No full camera dump or vendor firmware image is included in this repository.
 
 ## Advanced and audit documentation
 
+- [Printer-side LAN streaming failure: research, diagnosis, and replacement option](docs/PRINTER-LAN-STREAM-FAILURE.md)
 - [Installation and release downloads](docs/INSTALLATION.md)
 - [Complete cc2camera command reference](docs/CLI.md)
 - [Startup-fix installation and verification](docs/STARTUP-HOOKS.md)
