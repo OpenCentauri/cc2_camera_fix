@@ -99,8 +99,8 @@ KNOWN_CONFIG_NAMES = {
     b"dev_config.cfg",
 }
 
-SERIAL_PATTERN = re.compile(rb"^serial=(12PSSSS[34][A-Z0-9]{28})\n$")
-UOID_PATTERN = re.compile(rb"^12PSSSS[34][A-Za-z0-9+/=]{86}$")
+SERIAL_PATTERN = re.compile(rb"^serial=(12PSSSS[3-9][A-Z0-9]{28})\n$")
+UOID_PATTERN = re.compile(rb"^12PSSSS[3-9][A-Za-z0-9+/=]{86}$")
 
 # Exact byte ranges shared by every supported HWCONFIG variant.
 REFERENCE_SEGMENTS = {
