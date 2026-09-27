@@ -11,7 +11,7 @@
     "start": "0x7E0000",
     "validation": "JFFS2 structure/CRCs, known names, unambiguous serial"
   },
-  "format_version": 4,
+  "format_version": 5,
   "full_size": 8388608,
   "invariant_definition": {
     "excluded_or_normalized_ranges": [
@@ -27,13 +27,18 @@
       },
       {
         "end_inclusive": "0x7D200C",
-        "reason": "unit-specific HWCONFIG check value",
-        "start": "0x7D200B"
+        "reason": "unit-specific three-byte HWCONFIG check value",
+        "start": "0x7D200A"
       },
       {
         "end_inclusive": "0x7D206E",
         "reason": "unit-specific 94-byte HWCONFIG UOID",
         "start": "0x7D2011"
+      },
+      {
+        "end_inclusive": "0x7D2072",
+        "reason": "unit-specific little-endian year/month/day field",
+        "start": "0x7D206F"
       },
       {
         "end_inclusive": "0x7D2108",
@@ -43,14 +48,14 @@
     ],
     "included": "All bytes from 0x000000 through 0x7DFFFF except or normalized as listed below"
   },
-  "normalized_invariant_sha256": "7346221d7814c8ef4412ced5f3795891f077f89ba64cf61d087e01fc5344f62f",
+  "normalized_invariant_sha256": "4dee29ee9f996779a8af0f4e4a66ebad3c6c1ca353cf8b4287b4f1f9a8b12823",
   "hwconfig_record": {
     "record_type": 12,
     "known_payload_length": 256,
     "supported_payload_lengths": [256, 261],
     "extension_handling": "For payload length 261, preserve all five extension bytes exactly, report their SHA-256, and normalize them to zero for invariant comparison; reject other payload lengths",
-    "normalized_before_identity_sha256": "0e1514680c4e25e5c431adae5d4cb98bac14746b6e8fc30eb346ec75249f7cc5",
-    "normalized_after_uoid_sha256": "98d0beba4c7328a7237bc1a18fdd5e3da64c9f009e3b1c253ea39167a6dabd97",
+    "normalized_before_identity_sha256": "e9ba6b36ab55dd0284e7cfcaf8c6ece3b4903bf953dcae34026244a5febd701d",
+    "normalized_after_unit_fields_sha256": "f2e10823638187acb4572437debe618bb1c27d0a8796d40445c3132cdd805601",
     "observed_payloads": [
       {
         "payload_length": 256,
@@ -59,8 +64,20 @@
       {
         "payload_length": 261,
         "extension_hex": "0000029840"
+      },
+      {
+        "payload_length": 261,
+        "extension_hex": "0000000840"
       }
     ]
+  },
+  "identity_fields": {
+    "check_range": "0x7D200A-0x7D200C",
+    "date_encoding": "little-endian uint16 year, uint8 month, uint8 day; only physically observed values are accepted",
+    "date_range": "0x7D206F-0x7D2072",
+    "observed_date_values": ["2026-03-02", "2026-04-01"],
+    "serial_prefixes": ["12PSSSS3", "12PSSSS4"],
+    "uoid_prefixes": ["12PSSSS3", "12PSSSS4"]
   },
   "reference_images": [
     {
@@ -87,9 +104,14 @@
       "label": "Third camera bricked image",
       "sha256": "75d676ba4e478572777761d8caea43a6774a51d812050e4ba6ffa371a8ccc1e1",
       "state": "stock system, exhausted config, 261-byte HWCONFIG record"
+    },
+    {
+      "label": "Fourth camera bricked image",
+      "sha256": "574c71e6572093ea1b65c3ca9c3e5e1dd1e55d71443ca7b282db8ce700c45c85",
+      "state": "stock system, exhausted config, 12PSSSS3 identity, 261-byte HWCONFIG record"
     }
   ],
-  "scope": "Exact CC2 stock-camera firmware family and the 256- and 261-byte type-12 payload lengths observed in three independent cameras; the five-byte extension contents are normalized",
+  "scope": "Exact CC2 stock-camera firmware family, 12PSSSS3 and 12PSSSS4 identities, and the 256- and 261-byte type-12 payload lengths observed in four independent cameras; unit check/date fields and five-byte extension contents are normalized",
   "segments": {
     "boot": {
       "end_exclusive": "0x040000",

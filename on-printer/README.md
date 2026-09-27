@@ -5,7 +5,11 @@ working affected stock camera while it stays connected inside the printer.
 It runs on the printer, using USB HID directly. The static ARMv7 executable
 needs neither ADB, Python, `hidraw`, nor additional shared libraries.
 Installation with managed-script replacement and subsequent live verification
-have succeeded on the tested 30B camera. See the [validation scope](../docs/ON-PRINTER-HID.md#validation-status).
+have succeeded on a previously modified 30B camera. Volunteers are still needed
+for a first install on an unmodified, supported camera. If you try it, please
+[open an issue](https://github.com/OpenCentauri/cc2_camera_fix/issues/new) to share
+results and work through any problems or needed tool adjustments.
+See the [validation scope](../docs/ON-PRINTER-HID.md#validation-status).
 
 The [computer-based USB route](../README.md#working-camera-usb-prevention)
 provides an exported backup and a conservative clean-space check. Prefer that
@@ -28,8 +32,10 @@ The backup-based tools keep their existing requirements.
 
 You need:
 
-- a working affected Ingenic T23 camera, with the known stock kernel and HID
-  updater; this does not support the newer TX5110 camera or recover a camera
+- a working camera from the affected 8 MiB Ingenic T23 / ZB25VQ64 family, with
+  the supported kernel and HID updater. The earlier 16 MiB / P25Q128H 30B and
+  newer TX5110 30D are unsupported. PCB labels and stream identification do not
+  override the firmware and partition-map checks; this cannot recover a camera
   that no longer boots;
 - root shell access to the CC2 printer (obtaining this access is outside this
   guide), and a way to copy the executable onto its USB drive or filesystem;
@@ -38,15 +44,16 @@ You need:
 - an idle printer, with no print running and no other camera-maintenance tool
   using the HID interface.
 
-Restart the **idle** printer before starting an installation or verification
-attempt, so the camera uploader starts in its ordinary state. Do not use
+Fully power-cycle the **idle** printer before starting an installation or
+verification attempt, so the camera uploader starts in its ordinary state.
+A shell `reboot` may leave the camera powered and is not sufficient. Do not use
 `cc2camera start-adb` or another HID uploader first. During an attempt, do not
 interrupt power. The program never resets USB, changes its configuration,
 detaches a video interface, reboots the printer, or writes a firmware image.
 If a HID kernel driver is present, it temporarily detaches only `usbhid` on the
 selected HID interface and requests reattachment when it exits normally.
-Physical testing must establish whether the stock printer software tolerates
-this access while it owns the camera stream.
+The camera feed remained functional on the tested setup; report any disruption
+on yours in an issue.
 
 ## Obtain and inspect the executable
 

@@ -12,6 +12,7 @@ import time
 
 from . import __version__
 from . import image as image_tools
+from . import stream_identify
 from .display import invocation
 from .startup import install_startup
 from .restore_prepare import prepare_restore, validate_preparation_image
@@ -122,6 +123,48 @@ def command_info(args) -> int:
             f"0x{part.size:x} {part.name}"
         )
         offset += part.size
+    return 0
+
+
+def command_identify_camera(args) -> int:
+    """Identify a known camera family from the printer's read-only MJPEG stream."""
+
+    try:
+        identification = stream_identify.identify_camera_stream(
+            args.printer, timeout=args.timeout
+        )
+    except stream_identify.StreamIdentificationError as exc:
+        raise ProtocolError(str(exc)) from exc
+    if identification.family is None:
+        raise ProtocolError(
+            "camera stream signature is not recognized; camera revision remains unknown"
+        )
+
+    print(f"Camera stream matches: {identification.family}")
+    print(f"Frames checked: {identification.frames_checked} consistent JPEG frames")
+    if identification.family == "EF-S7-V1.0.30B":
+        print(
+            "Evidence: this encoder signature has been observed on two independent "
+            "known 30B cameras."
+        )
+        print(
+            "30B includes more than one flash-layout variant. The affected 8 MiB "
+            "variant has been observed with PCB date codes 0226, 0526 and 1526; "
+            "an earlier 4025 unit uses a different, unsupported 16 MiB layout."
+        )
+        print(
+            "The stream cannot distinguish those variants. Date codes are supporting "
+            "evidence only; do not bypass the tool's firmware and flash-layout checks."
+        )
+    else:
+        print(
+            "Evidence: this encoder signature has been observed on one known 30D camera."
+        )
+        print("The known 30B camera failure has not been observed on the 30D family.")
+    print(
+        "Stream fingerprinting is a read-only family-identification aid; hardware "
+        "markings and the validated firmware layout determine whether the fix applies."
+    )
     return 0
 
 
@@ -372,8 +415,8 @@ def command_restore(args) -> int:
         if remaining <= 0:
             raise ProtocolError(
                 "post-restore ADB availability timeout expired before the "
-                "temporary start. No HID ADB-start command was sent, and the "
-                "restore is not post-verified"
+                "temporary start. No HID ADB-start command was sent, and "
+                "the restore is not post-verified"
             )
         try:
             start_adb_through_upload_command()
@@ -441,6 +484,19 @@ def parser() -> argparse.ArgumentParser:
     devices.set_defaults(func=command_list, serial=None)
     info = commands.add_parser("device-info", parents=[common], help="validate root ADB and show flash layout; read-only")
     info.set_defaults(func=command_info)
+
+    identify = commands.add_parser(
+        "identify-camera",
+        help="identify a known 30B/30D camera from the printer MJPEG stream; read-only",
+    )
+    identify.add_argument("printer", help="printer hostname or IP address")
+    identify.add_argument(
+        "--timeout",
+        type=_positive_finite_duration,
+        default=stream_identify.DEFAULT_TIMEOUT,
+        help="HTTP stream timeout in seconds (default: 5)",
+    )
+    identify.set_defaults(func=command_identify_camera)
 
     backup = commands.add_parser("backup", parents=[common], help="save three consecutive identical flash reads; read-only")
     backup.add_argument("output", help="new backup archive ending in .zip")

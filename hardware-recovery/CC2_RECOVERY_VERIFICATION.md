@@ -1,5 +1,12 @@
 # CC2 camera recovery tool — independent verification
 
+> **Historical verification record:** This document describes the v1.1.0 tool
+> and the two physical dumps available on 2026-08-22. It is retained as an
+> audit record, not as the current compatibility contract. See
+> [TECHNICAL_DETAILS.md](TECHNICAL_DETAILS.md) for the current supported
+> HWCONFIG/identity structures and [TEST_RESULTS.md](TEST_RESULTS.md) for the
+> four-camera validation record.
+
 Review date: 2026-08-22  
 Reviewed tool: `cc2_sig_tool.py` v1.1.0
 
@@ -51,9 +58,10 @@ At the image level, yes. Both supplied bricked configs retain one unambiguous CR
 
 The result for both real units is deterministic and matches the previously documented output hashes. This is sufficient to verify image construction, identity preservation, and filesystem consistency. Only an actual flash/readback/boot test can establish electrical and runtime recovery for a particular board.
 
-## Cross-serial behavior and residual risk
+## Historical cross-serial behavior and residual risk
 
-Cross-serial support was directly verified on two real units and structurally tested on a third synthetic identity.
+At the time of this review, cross-serial support was directly verified on two
+real units and structurally tested on a third synthetic identity.
 
 The validator normalizes the observed five-byte opaque HWCONFIG extension and
 excludes the known unit-specific HWCONFIG fields and mutable config log from

@@ -2,9 +2,9 @@
 
 These findings cover the supported Ingenic T23 camera with ZB25VQ64 flash
 (JEDEC ID `5e4017`), Linux `3.10.14__isvp_pike_1.0__`, build #32 dated
-2025-12-03. Tests were performed by the developer on one camera; private
-same-camera backup archives were compared offline. No dumps or identity-bearing
-file contents are included here.
+2025-12-03, and PCB manufacturing code `1526`. Tests were performed by the
+developer on one camera; private same-camera backup archives were compared
+offline. No dumps or identity-bearing file contents are included here.
 
 The tested camera already had the image-based preventive startup change that
 copies defaults only when missing. Hook operation and the deliberate pressure

@@ -22,6 +22,22 @@ def hwconfig_record(length: int, extension: bytes = b"") -> bytes:
 
 
 class HwconfigVariantTests(unittest.TestCase):
+    def test_observed_identity_prefixes_are_supported(self):
+        for family in (b"3", b"4"):
+            with self.subTest(family=family.decode("ascii")):
+                serial = b"serial=12PSSSS" + family + b"A" * 28 + b"\n"
+                uoid = b"12PSSSS" + family + b"A" * 86
+                self.assertTrue(tool.serial_payload_is_valid(serial))
+                self.assertIsNotNone(tool.UOID_PATTERN.fullmatch(uoid))
+
+    def test_unobserved_identity_prefixes_are_rejected(self):
+        for family in (b"2", b"5"):
+            with self.subTest(family=family.decode("ascii")):
+                serial = b"serial=12PSSSS" + family + b"A" * 28 + b"\n"
+                uoid = b"12PSSSS" + family + b"A" * 86
+                self.assertFalse(tool.serial_payload_is_valid(serial))
+                self.assertIsNone(tool.UOID_PATTERN.fullmatch(uoid))
+
     def test_original_256_byte_record_is_supported(self):
         name, record = tool.identify_hwconfig_variant(hwconfig_record(0x100))
         self.assertEqual(name, "type12-length256")
@@ -66,6 +82,67 @@ class HwconfigVariantTests(unittest.TestCase):
             tool.invariant_bytes(original, original_record),
             tool.invariant_bytes(bytes(mutated), extended_record),
         )
+
+    def test_unit_fields_are_normalized_without_hiding_neighbors(self):
+        original = bytearray(hwconfig_record(0x100))
+        original[tool.HW_CHECK_START:tool.HW_CHECK_END] = b"\x01\x02\x03"
+        original[tool.HW_UOID_START:tool.HW_UOID_END] = (
+            b"12PSSSS4" + b"A" * 86
+        )
+        original[tool.HW_DATE_START:tool.HW_DATE_END] = (
+            (2026).to_bytes(2, "little") + bytes((4, 1))
+        )
+
+        observed = bytearray(hwconfig_record(0x105, bytes.fromhex("0000000840")))
+        observed[tool.HW_CHECK_START:tool.HW_CHECK_END] = b"\x04\x05\x06"
+        observed[tool.HW_UOID_START:tool.HW_UOID_END] = (
+            b"12PSSSS3" + b"B" * 86
+        )
+        observed[tool.HW_DATE_START:tool.HW_DATE_END] = (
+            (2026).to_bytes(2, "little") + bytes((3, 2))
+        )
+
+        original = bytes(original)
+        observed = bytes(observed)
+        _, original_record = tool.identify_hwconfig_variant(original)
+        _, observed_record = tool.identify_hwconfig_variant(observed)
+        self.assertEqual(
+            tool.invariant_bytes(original, original_record),
+            tool.invariant_bytes(observed, observed_record),
+        )
+
+        for offset in (tool.HW_CHECK_START - 1, tool.HW_DATE_END):
+            mutated = bytearray(observed)
+            mutated[offset] ^= 1
+            with self.subTest(offset=f"0x{offset:06X}"):
+                self.assertNotEqual(
+                    tool.invariant_bytes(original, original_record),
+                    tool.invariant_bytes(bytes(mutated), observed_record),
+                )
+
+    def test_hwconfig_date_is_validated(self):
+        image = bytearray(hwconfig_record(0x100))
+        image[tool.HW_DATE_START:tool.HW_DATE_END] = (
+            (2026).to_bytes(2, "little") + bytes((3, 2))
+        )
+        self.assertEqual(tool.decode_hwconfig_date(bytes(image)), "2026-03-02")
+
+        image[tool.HW_DATE_START:tool.HW_DATE_END] = (
+            (2026).to_bytes(2, "little") + bytes((4, 1))
+        )
+        self.assertEqual(tool.decode_hwconfig_date(bytes(image)), "2026-04-01")
+
+        image[tool.HW_DATE_START:tool.HW_DATE_END] = (
+            (2026).to_bytes(2, "little") + bytes((2, 30))
+        )
+        with self.assertRaisesRegex(tool.ValidationError, "not a valid"):
+            tool.decode_hwconfig_date(bytes(image))
+
+        image[tool.HW_DATE_START:tool.HW_DATE_END] = (
+            (2026).to_bytes(2, "little") + bytes((3, 3))
+        )
+        with self.assertRaisesRegex(tool.ValidationError, "physically observed"):
+            tool.decode_hwconfig_date(bytes(image))
 
     def test_short_known_payload_is_rejected(self):
         with self.assertRaisesRegex(tool.ValidationError, "shorter"):

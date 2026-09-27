@@ -11,6 +11,7 @@ current folder. Python installations also support `python -m cc2camera`.
 ```text
 cc2camera devices [--adb EXECUTABLE]
 cc2camera device-info [--adb EXECUTABLE] [--serial SERIAL]
+cc2camera identify-camera PRINTER [--timeout SECONDS]
 cc2camera start-adb [--adb EXECUTABLE] [--serial SERIAL] [--timeout SECONDS]
 cc2camera install-adb-startup --backup BACKUP.zip [--adb EXECUTABLE] [--serial SERIAL] [--yes]
 cc2camera install-erase-fix --backup BACKUP.zip [--adb EXECUTABLE] [--serial SERIAL] [--yes]
@@ -21,6 +22,20 @@ cc2camera backup OUTPUT.zip [--adb EXECUTABLE] [--serial SERIAL]
 - `devices`: best-effort, read-only USB/HID and ADB listing.
 - `device-info`: validate root ADB and the supported MTD partition layout.
   This is not a complete firmware-image inspection.
+- `identify-camera`: connect only to the printer's HTTP MJPEG stream on port
+  8080 and compare three consecutive JPEG encoder fingerprints with the known
+  `EF-S7-V1.0.30B` and `EF-S7-V1.0.30D` signatures. Pass a printer hostname or
+  IP address, for example `cc2camera identify-camera 192.168.1.50`. The command
+  does not use USB, HID or ADB and does not modify the printer or camera.
+  An unrecognized or changing signature is refused as unknown rather than
+  guessed. The 30B signature has been observed on two independent known 30B
+  cameras; the 30D signature has been observed on one known 30D camera. The
+  stream cannot distinguish the early 16 MiB and affected 8 MiB 30B variants.
+  Affected 8 MiB cameras have been observed with PCB manufacturing codes
+  `0226`, `0526` and `1526`; a supplied early 16 MiB camera is marked `4025`.
+  These codes appear to use `WWYY` order, but are supporting evidence rather
+  than a safe compatibility cutoff. The tool's firmware and flash-layout
+  checks determine whether the fix applies. Default HTTP timeout: 5 seconds.
 - `start-adb`: temporarily start the existing daemon; no persistent startup
   file. Default timeout: 30 seconds.
 - `install-adb-startup`: install `enabled/90-adb.sh` and the shared
@@ -140,6 +155,7 @@ The tool does not operate an external programmer.
 ## Exit status
 
 0 means the requested operation succeeded. 2 means a CLI, validation, or
-operating-system error. A successful dry run is not a successful physical
-restore. A failed post-write check means a write may already have occurred;
-read the error and keep the original backup.
+operating-system error. An unknown `identify-camera` signature is a validation
+failure and exits with 2 rather than guessing a camera revision. A successful
+dry run is not a successful physical restore. A failed post-write check means a
+write may already have occurred; read the error and keep the original backup.
