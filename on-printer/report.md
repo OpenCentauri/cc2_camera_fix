@@ -25,6 +25,10 @@ requiring ADB, Python or shared libraries on the printer.
 
 ## Observed 30D USB signature
 
+The 30D does not need this fix, but shares its USB vendor and product IDs with
+the affected 30B. The tool uses the signature below to recognize it before
+sending camera commands and explain that the patch does not apply.
+
 The observed 30D has a complete 1,005-byte (`0x3ed`) USB descriptor snapshot
 through the printer's sysfs. It declares one configuration of 987 bytes
 (`0x3db`), four interface numbers, and two UVC function associations. Windows

@@ -47,8 +47,7 @@ cd /mnt/exUDISK
 sha256sum -c cc2camera-hid-armv7-linux.sha256
 ```
 
-Continue only if the checksum reports `OK`. If `sha256sum` is unavailable,
-verify the checksum on your computer first. Adjust the drive path if needed.
+Continue only if the checksum reports `OK`. Adjust the drive path if needed.
 
 ```sh
 cp cc2camera-hid-armv7-linux /tmp/cc2camera-hid
@@ -58,9 +57,10 @@ chmod 755 /tmp/cc2camera-hid
 
 `inspect` reads the camera identification and queries its version. It does not
 upload anything or change camera files. **You can proceed directly to install
-without rebooting.** A message saying the version is unavailable is expected
-on cameras without a temporary version file; installation performs the firmware
-checks. Stop if inspection reports an error or an unsupported camera.
+without rebooting.** Some cameras have no version file, so inspection may report
+"Camera version unavailable". This does not prevent installing the fix; the
+installer checks firmware compatibility separately. Stop if inspection reports
+an error or an unsupported camera.
 
 ## Install
 
@@ -107,7 +107,9 @@ persistent files or applying the fix itself. Success is:
 Camera reports canonical hooks and the live erase correction verified for this boot.
 ```
 
-Check that the camera feed works too, and include that result in your issue.
+Check that the camera feed works too. Please consider
+[opening a GitHub issue](https://github.com/OpenCentauri/cc2_camera_fix/issues/new)
+to report a successful installation and the result of that check.
 
 ## If a command fails
 
