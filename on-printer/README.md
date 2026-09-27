@@ -5,8 +5,17 @@ disconnecting it from the printer. You need root shell access to an idle CC2
 and a USB drive to transfer the executable. Obtaining shell access is outside
 this guide.
 
-First [identify your camera](../README.md#first-identify-your-camera). This
-route supports the affected 8 MiB 30B family, not the early 16 MiB 30B or the
+**Keep an already-running camera powered; do not reboot to prepare for this
+procedure.** Another boot can exhaust a nearly full configuration partition
+and leave an affected camera unable to boot.
+
+Start with the [read-only stream identification](../README.md#first-identify-your-camera).
+If the stream is unavailable or the result is unknown, stop and
+[ask for help](https://github.com/OpenCentauri/cc2_camera_fix/issues/new) while
+leaving the camera powered. Do not proceed to that guide's physical-inspection
+fallback without first considering the risk of the extra boot it requires.
+
+This route supports the affected 8 MiB 30B family, not the early 16 MiB 30B or the
 30D. A camera that no longer boots needs [hardware recovery](../README.md#failed-camera-hardware-recovery).
 
 **Experimental:** installation and verification have succeeded on a previously
@@ -30,9 +39,8 @@ itself trigger failure. That procedure offers a backup and space check once
 connected; this route avoids the extra boot and cable work, but is less tested.
 The number of remaining boots cannot be determined by this tool.
 
-**Keep the camera powered for its first installation. Do not reboot as a
-preparation step.** If you have already attempted `install` or `verify` during
-this camera boot, see [If a command fails](#if-a-command-fails) before doing more.
+If you have already attempted `install` or `verify` during this camera boot,
+see [If a command fails](#if-a-command-fails) before doing more.
 
 ## Download and inspect
 
