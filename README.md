@@ -19,6 +19,18 @@ dump to your device.
 > It has produced the expected result in two tested cases, but if you have any
 > doubts, independently audit the tools before using them on your hardware.
 
+## Already have a root shell on the printer?
+
+The [experimental on-printer HID installer](on-printer/README.md) can install
+and verify the startup fix while a working camera stays connected inside the
+CC2. It needs neither ADB nor Python on the printer. It does **not** export a
+backup or check safely erased configuration space; a failed write may require
+an external programmer. Read that guide's risks and prerequisites before use.
+It has been tested on a previously modified camera; volunteers are still needed
+for a first install on an unmodified, supported camera. If you try it, please
+[open an issue](https://github.com/OpenCentauri/cc2_camera_fix/issues/new) to share
+results, get help, and guide any needed tool adjustments.
+
 ## First identify your camera
 
 The known failure affects one 8 MiB flash-layout variant of the
