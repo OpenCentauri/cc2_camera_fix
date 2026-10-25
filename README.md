@@ -64,7 +64,7 @@ or firmware changes may not align exactly with calendar weeks.
 
 | Identification | Observed manufacturing codes | What is known |
 |---|---|---|
-| `EF-S7-V1.0.30B` / Ingenic T23 / 8 MiB `ZB25VQ64` family | `0226`, `0526` (two units), `1526` | This is the supported layout on which the failure has been observed. Continue below. |
+| `EF-S7-V1.0.30B` / Ingenic T23 / 8 MiB `ZB25VQ64` family | `0226`, `0526` (two units), `1526`, `2526` | This is the supported layout on which the failure has been observed. Continue below. |
 | `EF-S7-V1.0.30B` / Ingenic T23 / 16 MiB `P25Q128H` family | `4025` | This early layout is materially different. The known erase defect has not been established on it, and the current fix does not apply. |
 | `EF-S7-V1.0.30D` / likely TX5110 | Not established | This revision is not affected by the known failure. This guide does not apply. |
 | Any other revision, processor or flash layout | Not established | It has not been investigated. We do not know whether it is affected, and this guide does not apply. |

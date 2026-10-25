@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Strict, self-contained recovery builder for the Elegoo Centauri Carbon 2
-stock camera firmware family observed in four independent 8 MiB dumps.
+stock camera firmware family observed in five independent 8 MiB dumps.
 
 The tool:
   * validates every invariant firmware byte against fingerprints derived
@@ -82,7 +82,9 @@ HW_UOID_START = 0x7D2011
 HW_UOID_END = 0x7D206F
 HW_DATE_START = HW_UOID_END
 HW_DATE_END = 0x7D2073
-HW_SUPPORTED_DATES = frozenset((date(2026, 3, 2), date(2026, 4, 1)))
+HW_SUPPORTED_DATES = frozenset(
+    (date(2026, 3, 2), date(2026, 4, 1), date(2026, 4, 17))
+)
 
 JFFS2_MAGIC = 0x1985
 JFFS2_NODE_ACCURATE = 0x2000
@@ -99,8 +101,8 @@ KNOWN_CONFIG_NAMES = {
     b"dev_config.cfg",
 }
 
-SERIAL_PATTERN = re.compile(rb"^serial=(12PSSSS[34][A-Z0-9]{28})\n$")
-UOID_PATTERN = re.compile(rb"^12PSSSS[34][A-Za-z0-9+/=]{86}$")
+SERIAL_PATTERN = re.compile(rb"^serial=(12PSSSS[345][A-Z0-9]{28})\n$")
+UOID_PATTERN = re.compile(rb"^12PSSSS[345][A-Za-z0-9+/=]{86}$")
 
 # Exact byte ranges shared by every supported HWCONFIG variant.
 REFERENCE_SEGMENTS = {

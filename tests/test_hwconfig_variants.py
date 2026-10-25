@@ -23,7 +23,7 @@ def hwconfig_record(length: int, extension: bytes = b"") -> bytes:
 
 class HwconfigVariantTests(unittest.TestCase):
     def test_observed_identity_prefixes_are_supported(self):
-        for family in (b"3", b"4"):
+        for family in (b"3", b"4", b"5"):
             with self.subTest(family=family.decode("ascii")):
                 serial = b"serial=12PSSSS" + family + b"A" * 28 + b"\n"
                 uoid = b"12PSSSS" + family + b"A" * 86
@@ -31,7 +31,7 @@ class HwconfigVariantTests(unittest.TestCase):
                 self.assertIsNotNone(tool.UOID_PATTERN.fullmatch(uoid))
 
     def test_unobserved_identity_prefixes_are_rejected(self):
-        for family in (b"2", b"5"):
+        for family in (b"2", b"6"):
             with self.subTest(family=family.decode("ascii")):
                 serial = b"serial=12PSSSS" + family + b"A" * 28 + b"\n"
                 uoid = b"12PSSSS" + family + b"A" * 86
@@ -96,10 +96,10 @@ class HwconfigVariantTests(unittest.TestCase):
         observed = bytearray(hwconfig_record(0x105, bytes.fromhex("0000000840")))
         observed[tool.HW_CHECK_START:tool.HW_CHECK_END] = b"\x04\x05\x06"
         observed[tool.HW_UOID_START:tool.HW_UOID_END] = (
-            b"12PSSSS3" + b"B" * 86
+            b"12PSSSS5" + b"B" * 86
         )
         observed[tool.HW_DATE_START:tool.HW_DATE_END] = (
-            (2026).to_bytes(2, "little") + bytes((3, 2))
+            (2026).to_bytes(2, "little") + bytes((4, 17))
         )
 
         original = bytes(original)
@@ -131,6 +131,11 @@ class HwconfigVariantTests(unittest.TestCase):
             (2026).to_bytes(2, "little") + bytes((4, 1))
         )
         self.assertEqual(tool.decode_hwconfig_date(bytes(image)), "2026-04-01")
+
+        image[tool.HW_DATE_START:tool.HW_DATE_END] = (
+            (2026).to_bytes(2, "little") + bytes((4, 17))
+        )
+        self.assertEqual(tool.decode_hwconfig_date(bytes(image)), "2026-04-17")
 
         image[tool.HW_DATE_START:tool.HW_DATE_END] = (
             (2026).to_bytes(2, "little") + bytes((2, 30))

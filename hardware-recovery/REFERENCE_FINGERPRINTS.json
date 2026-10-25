@@ -75,9 +75,9 @@
     "check_range": "0x7D200A-0x7D200C",
     "date_encoding": "little-endian uint16 year, uint8 month, uint8 day; only physically observed values are accepted",
     "date_range": "0x7D206F-0x7D2072",
-    "observed_date_values": ["2026-03-02", "2026-04-01"],
-    "serial_prefixes": ["12PSSSS3", "12PSSSS4"],
-    "uoid_prefixes": ["12PSSSS3", "12PSSSS4"]
+    "observed_date_values": ["2026-03-02", "2026-04-01", "2026-04-17"],
+    "serial_prefixes": ["12PSSSS3", "12PSSSS4", "12PSSSS5"],
+    "uoid_prefixes": ["12PSSSS3", "12PSSSS4", "12PSSSS5"]
   },
   "reference_images": [
     {
@@ -109,9 +109,19 @@
       "label": "Fourth camera bricked image",
       "sha256": "574c71e6572093ea1b65c3ca9c3e5e1dd1e55d71443ca7b282db8ce700c45c85",
       "state": "stock system, exhausted config, 12PSSSS3 identity, 261-byte HWCONFIG record"
+    },
+    {
+      "label": "Fifth camera bricked image",
+      "sha256": "f41e33b9927cfd8a5b11180872a2b940d645ad33ca3d13d5271476e930eb352e",
+      "state": "stock system, exhausted config, 12PSSSS5 identity, 2026-04-17 HWCONFIG date, 261-byte HWCONFIG record"
+    },
+    {
+      "label": "Fifth camera permanent full readback",
+      "sha256": "45acd32f451428513f14ca1238815e52a0508636060ef6973fa3ebafe0228a41",
+      "state": "audited bashrc patch, rebuilt config, physically boot-tested"
     }
   ],
-  "scope": "Exact CC2 stock-camera firmware family, 12PSSSS3 and 12PSSSS4 identities, and the 256- and 261-byte type-12 payload lengths observed in four independent cameras; unit check/date fields and five-byte extension contents are normalized",
+  "scope": "Exact CC2 stock-camera firmware family, 12PSSSS3, 12PSSSS4 and 12PSSSS5 identities, and the 256- and 261-byte type-12 payload lengths observed in five independent cameras; unit check/date fields and five-byte extension contents are normalized",
   "segments": {
     "boot": {
       "end_exclusive": "0x040000",

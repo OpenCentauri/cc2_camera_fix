@@ -49,7 +49,7 @@ class CliTests(unittest.TestCase):
         hid.assert_not_called()
         report = output.getvalue()
         self.assertIn("EF-S7-V1.0.30B", report)
-        self.assertIn("0226, 0526 and 1526", report)
+        self.assertIn("0226, 0526, 1526 and 2526", report)
         self.assertIn("4025", report)
         self.assertIn("stream cannot distinguish", report)
         self.assertIn("read-only family-identification aid", report)

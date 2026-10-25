@@ -5,7 +5,7 @@
 > audit record, not as the current compatibility contract. See
 > [TECHNICAL_DETAILS.md](TECHNICAL_DETAILS.md) for the current supported
 > HWCONFIG/identity structures and [TEST_RESULTS.md](TEST_RESULTS.md) for the
-> four-camera validation record.
+> five-camera validation record.
 
 Review date: 2026-08-22  
 Reviewed tool: `cc2_sig_tool.py` v1.1.0
