@@ -89,6 +89,38 @@ one representative file, rather than all independently acquired copies, was
 available in the test environment. This is software validation only; the
 generated image was not flashed or boot-tested.
 
+## `12PSSSS5` identity and `2026-04-17` HWCONFIG validation
+
+Validation date: 2026-10-24
+
+A fifth physical `EF-S7-V1.0.30B` camera with manufacturing code `2526`, an
+Ingenic T23 processor, and an 8 MiB `ZB25VQ64D`-family flash supplied three
+consecutive byte-identical reads. The reads were acquired at 1 MHz through a
+Pico-compatible `serprog` programmer without moving the SOIC-8 clip. All
+copies have SHA-256
+`f41e33b9927cfd8a5b11180872a2b940d645ad33ca3d13d5271476e930eb352e`.
+The raw dumps and full unit identifiers remain outside the repository.
+
+- Boot, kernel, root, every invariant system byte, the stock startup-script
+  window, and the normalized HWCONFIG fingerprint match the supported firmware
+  exactly.
+- The type-12 record has the observed 261-byte shape and five-byte extension
+  `00 00 00 08 40`.
+- The serial and UOID use the structurally matching `12PSSSS5` family while
+  retaining their established lengths and character sets.
+- The calendar-shaped field at `0x7D206F–0x7D2072` decodes to the newly
+  observed value `2026-04-17`.
+- Config was 98.457% non-`FF`, with 659 CRC-valid nodes, 657 obsolete nodes,
+  and only a live CRC-valid `serial.cfg`.
+- A three-read serial-only recovery build passed complete post-build
+  validation. It preserved HWCONFIG byte-for-byte and changed only the audited
+  startup-script window and config partition.
+- The generated recovery image has SHA-256
+  `45acd32f451428513f14ca1238815e52a0508636060ef6973fa3ebafe0228a41`.
+  After programming, a complete 8 MiB readback was byte-for-byte identical to
+  that image. The camera then booted, enumerated normally, and produced a
+  working video feed.
+
 ## Independent filesystem and patch checks
 
 - A separate read-only SquashFS v4/XZ parser extracted `/home/bashrc.sh` from stock and generated images.
@@ -110,7 +142,7 @@ generated image was not flashed or boot-tested.
   bytes passed strict analysis and recovery generation; the generated image
   retained HWCONFIG byte-for-byte. This is software validation, not a physical
   flash or boot test of that camera.
-- Four distinct real serial/UOID identities were inspected; the available
+- Five distinct real serial/UOID identities were inspected; the available
   full-ROM regression inputs were accepted and preserved.
 - An additional structurally valid synthetic identity with two confirmation
   reads (three total): accepted and preserved.
@@ -126,6 +158,9 @@ generated image was not flashed or boot-tested.
 
 ## Scope of the recovery claim
 
-Software-level recovery is verified: the available bricked dumps are transformed into strict, canonical images with the documented hashes, readable patched startup logic, preserved unit identity, and valid filesystem structures. One output also equals the earlier recorded permanent readback hash.
+Software-level recovery is verified: the available bricked dumps are transformed into strict, canonical images with the documented hashes, readable patched startup logic, preserved unit identity, and valid filesystem structures. Two outputs have recorded permanent full readbacks equal to their generated images.
 
-Hardware-level recovery is not newly proven by this review. That requires flashing a physical bricked camera, making a full byte-identical readback, and observing a successful boot/USB enumeration. The tool's generated `FLASHING.txt` makes that the required final validation step.
+Hardware-level recovery is verified on the fifth camera by a controlled flash,
+complete byte-identical readback, successful boot/USB enumeration, and working
+video feed. The tool's generated `FLASHING.txt` retains those checks as the
+required final validation sequence for each camera.

@@ -149,8 +149,9 @@ def command_identify_camera(args) -> int:
         )
         print(
             "30B includes more than one flash-layout variant. The affected 8 MiB "
-            "variant has been observed with PCB date codes 0226, 0526 and 1526; "
-            "an earlier 4025 unit uses a different, unsupported 16 MiB layout."
+            "variant has been observed with PCB date codes 0226, 0526, 1526 and "
+            "2526; an earlier 4025 unit uses a different, unsupported 16 MiB "
+            "layout."
         )
         print(
             "The stream cannot distinguish those variants. Date codes are supporting "

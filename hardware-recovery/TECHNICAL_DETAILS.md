@@ -112,7 +112,7 @@ compatibility boundary:
 
 | Observed layout | Manufacturing-code observations | Evidence |
 |---|---|---|
-| Supported 8 MiB `ZB25VQ64` family | `0226`, `0526` (two units), `1526` | The failure was reported on all four cameras. The `1526` unit and one recovered bricked unit have been physically recovered or protected with this fix. |
+| Supported 8 MiB `ZB25VQ64` family | `0226`, `0526` (two units), `1526`, `2526` | The failure was reported on all five cameras. The `1526` unit and two recovered bricked units, including the `2526` unit, have been physically recovered or protected with this fix. |
 | Early 16 MiB `P25Q128H` family | `4025` | Two supplied full dumps share the 16 MiB partition map. Photographs show the T23, 30B PCB label, manufacturing code and 128-Mbit flash. Their JFFS2 cleanmarkers occur at `0x8000` intervals, matching an erase size handled by their kernel. The known `0x4000` erase mismatch has not been established on this layout. |
 
 The early dumps were analyzed privately and remain outside the repository.
@@ -120,7 +120,7 @@ The 16 MiB family is not accepted by the builder or installers. A manufacturing
 code, PCB revision or stream signature never overrides firmware, capacity,
 partition-map or erase-geometry validation.
 
-This release intentionally accepts only the exact firmware family already verified in four independent camera dumps with different unit identities:
+This release intentionally accepts only the exact firmware family already verified in five independent camera dumps with different unit identities:
 
 - 8 MiB `ZB25VQ64` SPI NOR
 - Ingenic T23N
@@ -147,8 +147,8 @@ string. JFFS2 appends new nodes on each boot, so two otherwise identical
 cameras naturally have different raw `config` histories. The HWCONFIG
 partition also contains a per-unit UOID, an associated three-byte value, and a
 four-byte little-endian year/month/day field. The date interpretation is based
-on the observed `2026-03-02` and `2026-04-01` byte sequences; its exact vendor
-semantics remain unknown.
+on the observed `2026-03-02`, `2026-04-01`, and `2026-04-17` byte sequences;
+its exact vendor semantics remain unknown.
 
 The known 256-byte prefix of its type-12 length-prefixed record is validated.
 Two payload lengths have been directly observed:
@@ -165,12 +165,13 @@ The record length exactly includes the five added bytes. The camera's own
 `ucamera` executable advances over this structure as a little-endian 16-bit
 type, a little-endian 16-bit payload length, and that many payload bytes.
 
-The observed serial and UOID families begin with either `12PSSSS3` or
-`12PSSSS4`. Both retain the same total lengths and remaining character
+The observed serial and UOID families begin with `12PSSSS3`, `12PSSSS4`, or
+`12PSSSS5`. All retain the same total lengths and remaining character
 structure. The fourth camera established that the adjacent check field spans
-three bytes and that the calendar-shaped field varies by unit. Both fields are
-preserved exactly and validated structurally rather than treated as firmware
-bytes.
+three bytes and that the calendar-shaped field varies by unit. The fifth
+camera established the `12PSSSS5` family and `2026-04-17` date value. Both
+fields are preserved exactly and validated structurally rather than treated
+as firmware bytes.
 
 The meaning of the five-byte extension is unknown, so its value is not treated
 as a firmware invariant. The validator requires record type 12 and one of the
@@ -204,7 +205,7 @@ The validator therefore performs the strongest safe equivalent of “100% match 
    - an all-zero or all-`FF` check value is reported as a warning;
    - the UOID must have an observed prefix and the expected 94-byte structure;
    - the four-byte date must decode as one of the physically observed calendar
-     values, `2026-03-02` or `2026-04-01`;
+     values, `2026-03-02`, `2026-04-01`, or `2026-04-17`;
    - `config` must contain CRC-valid JFFS2 nodes;
    - serial-only accepts only the six known filenames unless
      `--wipe-unknown-config` is explicit;
@@ -244,11 +245,11 @@ only for the observed five-byte extension. A future Elegoo/Jovision build,
 another payload length, or a different record type or known-prefix layout must
 be analyzed and fingerprinted separately.
 
-Four real unit identities were directly inspected, including two with the
-261-byte HWCONFIG record and one `12PSSSS3` identity. Invariant firmware and
-the known HWCONFIG prefix must match exactly after unit-field and extension
-normalization, while the UOID and serial must each match their observed
-structure.
+Five real unit identities were directly inspected, including three with the
+261-byte HWCONFIG record, one `12PSSSS3` identity, and one `12PSSSS5`
+identity. Invariant firmware and the known HWCONFIG prefix must match exactly
+after unit-field and extension normalization, while the UOID and serial must
+each match their observed structure.
 All unit-specific HWCONFIG bytes and the recovered serial payload are preserved
 exactly. Because the proprietary full serial↔UOID derivation is unknown, the
 tool does not infer or enforce a relationship between those independently
