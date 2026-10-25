@@ -19,6 +19,16 @@ dump to your device.
 > It has produced the expected result in two tested cases, but if you have any
 > doubts, independently audit the tools before using them on your hardware.
 
+## Already have a root shell on the printer?
+
+The [experimental on-printer installer](on-printer/README.md) installs the
+startup fix while a working, affected camera stays connected inside the CC2.
+See the guide for instructions and the risk of installation without a backup or
+free-space check. It has been tested on a previously modified camera; volunteers
+with an unmodified, supported camera are invited to
+[open an issue](https://github.com/OpenCentauri/cc2_camera_fix/issues/new) to share
+results and get help.
+
 ## First identify your camera
 
 The known failure affects one 8 MiB flash-layout variant of the
