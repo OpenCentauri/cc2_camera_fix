@@ -6,6 +6,11 @@ and independent readback—see
 [PHYSICAL-VALIDATION.md](PHYSICAL-VALIDATION.md). Raw dumps, UART logs, host
 paths, serials, and unit-specific hashes are intentionally not published.
 
+For the separate **printer-side LAN streaming crash**, including the retained
+client-thread defect, exact affected build, crash findings, and recovery
+limitations, see [the consolidated research note](../docs/PRINTER-LAN-STREAM-FAILURE.md).
+That failure is not repaired by this repository's camera-flash operations.
+
 ## Inputs
 
 | Artifact | Size | SHA-256 |
