@@ -164,3 +164,53 @@ Hardware-level recovery is verified on the fifth camera by a controlled flash,
 complete byte-identical readback, successful boot/USB enumeration, and working
 video feed. The tool's generated `FLASHING.txt` retains those checks as the
 required final validation sequence for each camera.
+
+## Fedora 44 CH341 recovery
+
+Recovery date: 2026-11-11. Hardware discussion: [issue #28](https://github.com/OpenCentauri/cc2_camera_fix/issues/28).
+
+| Item | Observed value |
+|---|---|
+| Camera PCB / SoC | `EF-S7-V1.0.30B` / Ingenic T23 |
+| Flash marking | `25Q64DSIG` |
+| Measured JEDEC ID | `5E 40 17` |
+| SFDP capacity | 8 MiB / 8,388,608 bytes |
+| Programmer | CH341, USB ID `1a86:5512` |
+| Host | Fedora Linux 44 |
+| Flash tool | flashrom 1.6.0, `ch341a_spi`, `SFDP-capable chip` |
+| Recovery builder | cc2camera 0.9.0, commit `28fae6d9a0ea5a703144ded4c4b241e52614cf01` |
+
+The package marking had suggested a Zetta ZD25Q64B, but `BA 32 17` was a
+value taken from a datasheet, not measured from this unit. The actual chip
+returned the Zbit-family ID `5E 40 17`. flashrom had no named profile for it;
+SFDP detection supplied the capacity and standard operation parameters.
+
+### Observed checks
+
+- Three full 8,388,608-byte reads were byte-identical. The owner copied the
+  preserved originals to a USB drive and confirmed checksum verification there.
+- The original passed strict firmware, layout and identity validation. The
+  configuration area was 97.854% occupied: 751 CRC-valid JFFS2 nodes, two current
+  and 749 obsolete. Only `serial.cfg` remained live.
+- The builder passed in default `serial-only` mode. All 142,232 changed bytes
+  were inside `system_bashrc_patch` and `config`; the other bytes were unchanged.
+- An additional full read immediately before programming matched the original.
+- Writing the full recovery image with the detected SFDP profile passed
+  flashrom's default full-chip verification. No force, no-verify or manual
+  write-protection overrides were used.
+- A separate full readback matched the recovery image byte-for-byte and by SHA-256.
+- After disconnecting the programmer and reinstalling the camera, the owner
+  confirmed that its video feed worked again in the printer.
+
+| Artifact | SHA-256 |
+|---|---|
+| All three original reads and the pre-write read | `c5123f6b7abeb8a3344550f3c62892c365fc34e6449a82e2a70a4bdd7dd663bc` |
+| Recovery image and independent readback | `785efc6698a8e292899a98d00aa50c30d3272a91c7661c9b65aed117df6a1bb2` |
+
+These are fingerprints for this unit, not download references or universal
+expected hashes. The dumps, firmware image and unredacted identifiers are not
+included. This recovery does not establish support for other JEDEC IDs,
+firmware or flash layouts. Long-term power-cycle endurance was not tested.
+
+The repeatable steps are in the
+[Linux programmer procedure](PROGRAMMER_REFERENCE.md#linux-with-flashrom-and-ch341).
