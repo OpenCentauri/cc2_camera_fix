@@ -72,6 +72,85 @@ Only after the tool reports a byte-for-byte match should you unplug the CH341 pr
 
 NeoProgrammer's labels can vary slightly by release, but the required operation order does not: **three stable reads → build → full-chip erase → blank check → program → internal verify → full readback → tool verify**. NeoProgrammer describes the same backup/erase/write/verify capabilities in its [software overview](https://neoprogrammer.org/).
 
+### Linux with flashrom and CH341
+
+The [Fedora hardware test record](TEST_RESULTS.md#fedora-44-ch341-recovery) documents
+a successful recovery with this procedure. It is limited to the tested
+`5E 40 17` / 8 MiB SFDP setup; other IDs or layouts require separate validation.
+
+Follow the electrical checks in this reference and the
+[main recovery guide](../README.md#failed-camera-hardware-recovery). Install flashrom with
+`sudo dnf install flashrom` and cc2camera through the
+[Python installation instructions](../docs/INSTALLATION.md). The documented test used cc2camera v0.9.0 (commit
+`28fae6d9a0ea5a703144ded4c4b241e52614cf01`). If using a virtual
+environment, use its command prefix in place of `cc2camera` below. Keep all
+commands in a new working directory and close other programmer applications.
+
+First probe without requesting a write:
+
+```sh
+flashrom -p ch341a_spi -VV
+```
+
+In the tested setup, the `Generic unknown SPI chip (RDID)` probe returned
+`id1 0x5e, id2 0x4017`. Although flashrom had no named profile for the part,
+SFDP detected an `SFDP-capable chip` with a capacity of `8192 kB`. Continue only
+if these values agree; do not force a similar chip definition.
+
+Read the complete flash three times without moving the clip:
+
+```sh
+flashrom -p ch341a_spi -c "SFDP-capable chip" -r cc2-camera-1.bin &&
+flashrom -p ch341a_spi -c "SFDP-capable chip" -r cc2-camera-2.bin &&
+flashrom -p ch341a_spi -c "SFDP-capable chip" -r cc2-camera-3.bin
+wc -c cc2-camera-1.bin cc2-camera-2.bin cc2-camera-3.bin
+cmp cc2-camera-1.bin cc2-camera-2.bin && cmp cc2-camera-1.bin cc2-camera-3.bin
+sha256sum cc2-camera-1.bin cc2-camera-2.bin cc2-camera-3.bin > original-SHA256SUMS.txt
+```
+
+Each file must contain exactly **8,388,608 bytes**. Both comparisons must succeed
+and all three hashes must match. Copy the dumps and checksum file to a separate
+drive, then run `sha256sum -c original-SHA256SUMS.txt` there. Every entry must
+report `OK` before continuing.
+
+Build the camera-specific image using all three reads:
+
+```sh
+cc2camera build-image cc2-camera-1.bin --confirm-read cc2-camera-2.bin --confirm-read cc2-camera-3.bin
+(cd cc2-camera-1-cc2-recovery && sha256sum -c SHA256SUMS.txt)
+```
+
+Stop if the build or checksum verification fails. The generated `FLASHING.txt`
+may contain a Bus Pirate/`COM11` template; do not use it unchanged with a CH341.
+Before writing, make another full read and require it to match the original:
+
+```sh
+flashrom -p ch341a_spi -c "SFDP-capable chip" -r cc2-camera-before-write.bin &&
+cmp cc2-camera-1.bin cc2-camera-before-write.bin
+```
+
+**The next command erases/programs flash.** Run it only after the comparison
+succeeds and the external original backup has been checked:
+
+```sh
+flashrom -p ch341a_spi -c "SFDP-capable chip" -w cc2-camera-1-cc2-recovery/cc2-camera-recovery.bin
+```
+
+flashrom erases/programs the required blocks and performs full-chip verification
+by default. Do not disable verification, use force options or change protection
+bits to bypass an error. After successful verification, read the whole chip
+again and compare it with the recovery image:
+
+```sh
+flashrom -p ch341a_spi -c "SFDP-capable chip" -r cc2-camera-readback.bin &&
+cmp cc2-camera-1-cc2-recovery/cc2-camera-recovery.bin cc2-camera-readback.bin
+sha256sum cc2-camera-1-cc2-recovery/cc2-camera-recovery.bin cc2-camera-readback.bin
+```
+
+The byte comparison must succeed and both hashes must match. Only then unplug
+the programmer, remove the clip and reconnect the camera to the powered-off
+printer. After reassembly, power on the printer and check the video feed.
+
 ### Alternative: flashrom with a Bus Pirate
 
 The generated `FLASHING.txt` also contains a `flashrom` command for the Bus Pirate. Unlike the NeoProgrammer workflow, it writes only the regions reported as changed and deliberately does not enable programmer-supplied target power.
