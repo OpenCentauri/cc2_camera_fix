@@ -42,7 +42,7 @@ jobs:
           if-no-files-found: error
 
   on-printer:
-    uses: ./.github/workflows/on-printer.yml
+    uses: $/.github/workflows/on-printer.yml
     permissions:
       contents: read
 
