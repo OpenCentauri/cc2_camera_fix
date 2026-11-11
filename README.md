@@ -269,11 +269,11 @@ a command line.
 
 ### What you need
 
-- a Windows computer;
+- a Windows computer for NeoProgrammer, or Linux for flashrom;
 - a CH341A/CH341B programmer verified for 3.3 V operation;
 - an SOIC-8 test clip and cable;
 - a multimeter;
-- NeoProgrammer;
+- NeoProgrammer (Windows) or flashrom (Linux);
 - [cc2camera installed](docs/INSTALLATION.md); the standalone Windows executable needs no Python or Git.
 
 The CH341 worked with the flash still soldered on the tested camera. A Bus
@@ -356,6 +356,16 @@ the setup connected and diagnose it rather than trying to boot the camera.
 Only after complete verification succeeds should you unplug the programmer,
 remove the clip, reconnect the camera's normal cable, and test it in the
 printer.
+
+**Linux / CH341:** See the [flashrom procedure](hardware-recovery/PROGRAMMER_REFERENCE.md#linux-with-flashrom-and-ch341)
+for chip identification, three verified backups and image building. After those
+checks, these commands **write flash** and verify a complete readback:
+
+```sh
+flashrom -p ch341a_spi -c "SFDP-capable chip" -w cc2-camera-1-cc2-recovery/cc2-camera-recovery.bin &&
+flashrom -p ch341a_spi -c "SFDP-capable chip" -r cc2-camera-readback.bin &&
+cmp cc2-camera-1-cc2-recovery/cc2-camera-recovery.bin cc2-camera-readback.bin
+```
 
 ## What the repair changes
 
