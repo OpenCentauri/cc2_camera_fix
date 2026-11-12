@@ -9,7 +9,7 @@ an affected camera:
 - if there is too little free space to install that fix, use a same-camera
   backup to build and restore a preventive image through USB;
 - a camera that no longer starts can be recovered from its own flash backup
-  with an external programmer.
+  with an external programmer, or as a fallback over USB boot without one.
 
 All routes preserve the identity of **your** camera. There is no generic
 firmware image in this repository, and you must never write another camera's
@@ -95,8 +95,13 @@ First check whether the fault is isolated to the camera:
 3. Power the printer on.
 
 If the replacement webcam produces a feed, the stock camera is likely the
-problem. Continue with the
-[hardware recovery route](#failed-camera-hardware-recovery).
+problem. If you have an external programmer, or can obtain one easily, continue
+with the [hardware recovery route](#failed-camera-hardware-recovery). If you
+want to try recovery without a programmer, use the
+[USB-boot fallback](#failed-camera-usb-boot-recovery-without-a-programmer).
+Connecting a custom camera cable directly to a laptop lacks the in-circuit
+protection that a proper SPI programmer usually provides, so treat that path
+as optional rather than recommended.
 
 If the replacement webcam also fails, this test has not isolated the problem
 to the stock camera. Stop this camera-recovery procedure.
@@ -262,7 +267,8 @@ that already contains hooks has [additional limitations](docs/STARTUP-HOOKS.md#r
 
 ## Failed camera: hardware recovery
 
-This route reads and rewrites the camera's eight-pin SPI flash with an external
+This is the recommended recovery route when the stock camera no longer starts.
+It reads and rewrites the camera's eight-pin SPI flash with an external
 programmer. The recommended setup uses the NeoProgrammer graphical
 application for every flash operation; only the recovery-image build requires
 a command line.
@@ -357,6 +363,59 @@ Only after complete verification succeeds should you unplug the programmer,
 remove the clip, reconnect the camera's normal cable, and test it in the
 printer.
 
+## Failed camera: USB-boot recovery without a programmer
+
+This is an optional fallback if you do not have an external SPI programmer.
+It forces the Ingenic bootrom into USB boot, reads the flash over USB, builds
+the same camera-specific recovery image, and writes that image back over USB.
+
+A homemade camera-to-USB cable plugged straight into a computer does not give
+you the voltage checks and isolation that a CH341-style programmer workflow
+emphasizes. Prefer the [hardware recovery route](#failed-camera-hardware-recovery)
+when you can.
+
+Full steps, pin diagram notes, stop conditions, and verification are in
+[docs/USB-BOOT-RECOVERY.md](docs/USB-BOOT-RECOVERY.md). Summary:
+
+1. Build the same [camera-to-USB cable](#build-the-camera-to-usb-cable) used by
+   the working-camera route.
+2. Power the camera over that cable while briefly shorting SPI flash pins
+   **5 and 6** (SOIC-8: SI/MOSI and SCLK, counting from the pin-1 dot/notch).
+   The host should show **Ingenic USB Boot Device** (`a108:c309`). Remove the
+   short as soon as that device appears; leave it shorted only for power-up.
+
+   ![SPI flash pins 5 and 6 to short for USB boot](docs/images/cc2-flash-short-pins-5-6.jpg)
+3. Use [thingino-dfu](https://github.com/wltechblog/thingino-dfu) to bootstrap
+   DFU and read the whole flash three times:
+
+   ```sh
+   thingino-dfu -b
+   thingino-dfu --alt flash -r cc2-camera-1.bin
+   thingino-dfu --alt flash -r cc2-camera-2.bin
+   thingino-dfu --alt flash -r cc2-camera-3.bin
+   ```
+
+   Each file must be exactly 8,388,608 bytes, and all three must match
+   byte-for-byte. Copy them somewhere safe before continuing.
+4. Build the recovery image with the same offline builder as the programmer
+   route:
+
+   ```sh
+   cc2camera build-image cc2-camera-1.bin --confirm-read cc2-camera-2.bin --confirm-read cc2-camera-3.bin
+   ```
+5. Write and verify over DFU, then confirm three readbacks match the generated
+   image:
+
+   ```sh
+   thingino-dfu --alt flash -w cc2-camera-1-cc2-recovery/cc2-camera-recovery.bin --verify
+   ```
+6. Power-cycle **without** the flash short. The camera should leave bootrom and
+   enumerate as a normal UVC device (observed: `Ingenic HD Web Camera`,
+   `a108:2240`). Only then return it to the printer.
+
+Stop if USB stays silent, the three dumps disagree, `build-image` refuses the
+dump, or DFU verify / readback mismatches. Do not write another camera's image.
+
 ## What the repair changes
 
 Affected cameras repeatedly rewrite the same configuration files during every
@@ -394,6 +453,7 @@ No full camera dump or vendor firmware image is included in this repository.
 - [Startup-fix installation and verification](docs/STARTUP-HOOKS.md)
 - [Startup-fix hardware findings](docs/STARTUP-HOOKS-VALIDATION.md)
 - [Programmer and alternative-hardware reference](hardware-recovery/PROGRAMMER_REFERENCE.md)
+- [USB-boot recovery without a programmer](docs/USB-BOOT-RECOVERY.md)
 - [Independent recovery-tool verification](hardware-recovery/CC2_RECOVERY_VERIFICATION.md)
 - [Hardware-recovery regression results](hardware-recovery/TEST_RESULTS.md)
 - [USB-maintenance reference](usb-maintenance/REFERENCE.md)
