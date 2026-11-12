@@ -2,15 +2,16 @@
 
 Start with the repository's
 [camera identification and recovery guide](../README.md#first-identify-your-camera).
-It determines whether this repair applies.
+It determines whether this repair applies and presents the normal
+NeoProgrammer workflow with one required command-line invocation.
 
-If the camera no longer starts and you can force USB boot, prefer the
-[USB-boot recovery route without a programmer](../docs/USB-BOOT-RECOVERY.md)
-(short flash pins 5 and 6 at power-up, then read/write with thingino-dfu and
-`cc2camera build-image`). This directory documents the external-programmer
-(NeoProgrammer / CH341) workflow with one required command-line invocation.
+If you do not have an external programmer and want to try recovery over USB
+boot instead, see the optional
+[USB-boot fallback](../docs/USB-BOOT-RECOVERY.md). Prefer this directory's
+programmer path when you can: a CH341-style setup includes voltage checks and
+isolation that a homemade camera-to-USB cable plugged into a laptop does not.
 
-For details beyond that programmer path:
+For details beyond that normal path:
 
 - [CLI reference](../docs/CLI.md) documents inspection, alternate build
   modes, output files, and independent readback verification.
@@ -21,5 +22,3 @@ For details beyond that programmer path:
   electrical mapping and the Bus Pirate alternative.
 - [Independent verification](CC2_RECOVERY_VERIFICATION.md) and
   [regression results](TEST_RESULTS.md) record the current evidence.
-
-

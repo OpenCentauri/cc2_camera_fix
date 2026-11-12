@@ -1,18 +1,23 @@
 # Failed camera: USB-boot recovery without an SPI programmer
 
-This route recovers a camera that no longer starts by forcing the Ingenic
+This is an **optional fallback** when you do not have an external SPI
+programmer. It recovers a camera that no longer starts by forcing the Ingenic
 bootrom into USB boot, reading the on-board SPI flash over USB, building the
 same camera-specific recovery image that the programmer path uses, and writing
 that image back over USB.
+
+The recommended route remains the
+[external-programmer workflow](../README.md#failed-camera-hardware-recovery).
+A homemade camera-to-USB cable plugged straight into a computer does not give
+you the voltage checks and isolation that a CH341-style programmer setup
+emphasizes. Use this document only if you accept that trade-off.
 
 It was validated on one supported `EF-S7-V1.0.30B` / Ingenic T23 / 8 MiB unit:
 three identical 8 MiB reads, a successful `cc2camera build-image`, a verified
 full-chip write, and re-enumeration as a normal UVC webcam.
 
 This path still uses **your** camera's dump. Never write another camera's
-image. Prefer the [external-programmer route](../README.md#failed-camera-hardware-recovery)
-if you already have a trusted CH341 setup; keep this route when you can make
-the camera-to-USB cable and briefly short two flash pins.
+image.
 
 ## What you need
 
