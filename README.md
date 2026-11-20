@@ -357,6 +357,24 @@ Only after complete verification succeeds should you unplug the programmer,
 remove the clip, reconnect the camera's normal cable, and test it in the
 printer.
 
+### Alternative: Raspberry Pi 3 SPI programmer
+
+A Raspberry Pi 3 can also be used to read and program the camera's SPI flash
+using an SOIC-8 clip and flashrom.
+
+This method has been successfully tested on one CC2 camera with an 8 MiB
+SPI flash. It is an experimental alternative and has not been validated
+across all supported hardware revisions or flash-chip variants.
+
+See the complete guide: [ Raspberry Pi 3 SPI recovery instructions ](hardware-recovery/RASPBERRY_PI_INSTRUCTIONS.md)
+
+Tested configuration:
+- Raspberry Pi 3
+- Raspberry Pi OS 64-bit
+- flashrom 1.4.0
+- Linux SPI0 at 1 MHz
+- SOIC-8 clip
+
 ## What the repair changes
 
 Affected cameras repeatedly rewrite the same configuration files during every
